@@ -174,7 +174,7 @@ PRIVATE_KEY=0x你的私钥 \
 RPC_URL=https://rpc.xlayer.tech \
 PROCESSOR_FACTORY=0xX Layer 上的 TapeOut ProcessorFactory \
 PLATFORM=0x平台收款地址 \
-PLATFORM_BPS=1000 \
+PLATFORM_BPS=300 \
 MIN_PLAY_PRICE=0 \
 MONTHLY_FEE=10000000000000000 \
 npm run deploy
@@ -184,7 +184,7 @@ npm run deploy
 |---------|--------|------|
 | `PRIVATE_KEY` | 必填 | 部署者私钥 |
 | `PLATFORM` | 部署者地址 | 平台收益收款地址 |
-| `PLATFORM_BPS` | `1000` (10%) | 付费播放时平台分成（基点） |
+| `PLATFORM_BPS` | `300` (3%) | 平台抽成比例（基点），每笔收入先行扣除 |
 | `MIN_PLAY_PRICE` | `0` | 单次付费播放最低价（wei） |
 | `MONTHLY_FEE` | `0.01 OKB` | 订阅月费（wei） |
 | `RPC_URL` | X Layer RPC | 可覆盖为其他链 RPC |
@@ -315,9 +315,9 @@ struct RoyaltyRecipient {
 
 ### 版税分配
 
-- 付费播放金额先扣平台分成（`platformBps`，默认 10%）
+- 每笔收入先按 `platformBps` 扣除平台抽成（默认 3%）
 - 剩余部分按曲目的 `royalties` 比例分流给各收益方
-- 未分配的部分归主艺人（注册者）
+- 取整余数归平台，确保金额全部分出
 
 ### 订阅池结算
 

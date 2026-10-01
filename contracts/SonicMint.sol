@@ -10,9 +10,23 @@ pragma solidity ^0.8.20;
  *           3. 买断制：单曲一次付费，永久可听，收入即时分流
  *           4. 多方版税：每首歌可配置多个收益方（艺人/制作人/作词/作曲…）
  *           5. 无损分片：单文件超 8.4MB 可分片上传，前端合并播放
+ *           6. 平台抽成：每笔收入先按 platformBps 扣除，余下按版税比例分给收益方
+ *           7. 处理器白名单：仅指定处理器的电路可发行唱片，并校验容器归属与开启状态
  *
  * 播放本身不收钱，付费只发生在 buy()（买断）与 subscribe()（订阅）
  */
+
+/// TapeOut 处理器工厂：按编号查处理器地址
+interface IProcessorFactory {
+    function cpuAt(uint256 number) external view returns (address);
+}
+
+/// TapeOut 容器开启器：按 (处理器, 电路#ID) 查容器地址与开启状态
+interface IContainerOpener {
+    function accountOf(address processor, uint256 tokenId) external view returns (address);
+    function isOpened(address processor, uint256 tokenId) external view returns (bool);
+}
+
 contract SonicMint {
     // ───────────────────────── 数据结构 ─────────────────────────
 
@@ -47,7 +61,12 @@ contract SonicMint {
     uint256 public trackCount;
 
     address public platform;
-    uint256 public platformBps;       // 平台分成（版税未分配部分归平台）
+    uint256 public platformBps;       // 平台抽成比例（基点，1000 = 10%），每笔收入先行扣除
+
+    // TapeOut 协议地址（用于发行时校验处理器与容器）
+    address public immutable factory; // 处理器工厂
+    address public immutable opener;  // 容器开启器
+    address public allowedProcessor;  // 唯一允许发行唱片的处理器；address(0) = 不限
 
     // 买断：用户 => 曲目 => 已买断
     mapping(address => mapping(uint256 => bool)) public purchased;
@@ -74,12 +93,24 @@ contract SonicMint {
 
     // ───────────────────────── 构造 ─────────────────────────
 
-    constructor(address _platform, uint256 _platformBps, uint256 _monthlyFee) {
+    constructor(
+        address _platform,
+        uint256 _platformBps,
+        uint256 _monthlyFee,
+        address _factory,
+        address _opener,
+        address _processor
+    ) {
         require(_platform != address(0), "platform = zero");
         require(_platformBps <= 10000, "bps > 10000");
+        require(_factory != address(0), "factory = zero");
+        require(_opener != address(0), "opener = zero");
         platform = _platform;
         platformBps = _platformBps;
         monthlyFee = _monthlyFee;
+        factory = _factory;
+        opener = _opener;
+        allowedProcessor = _processor;
     }
 
     // ───────────────────────── 修饰器 ─────────────────────────
@@ -93,22 +124,29 @@ contract SonicMint {
 
     // ───────────────────────── 内部：分发版税给多方 ─────────────────────────
 
-    /// @notice 将 amount 按 trackRoyalties 比例分发给各收益方，剩余给平台
+    /// @notice 将 amount 按「平台抽成 → 版税分配 → 余数归平台」的顺序分完
+    /// @dev    platformBps 先行扣除；剩余部分按 trackRoyalties 比例分配；
+    ///         分配后的取整余数一并归平台，确保 amount 全部分出
     function _distributeRoyalties(uint256 trackId, uint256 amount) internal {
         RoyaltyRecipient[] storage recipients = trackRoyalties[trackId];
-        uint256 remaining = amount;
 
+        // 平台抽成部分（不参与版税分配）
+        uint256 platformCut = (amount * platformBps) / 10000;
+        uint256 rest = amount - platformCut;
+
+        uint256 distributed = 0;
         for (uint256 i = 0; i < recipients.length; i++) {
-            uint256 share = (amount * recipients[i].bps) / 10000;
+            uint256 share = (rest * recipients[i].bps) / 10000;
             if (share == 0) continue;
             (bool ok, ) = recipients[i].addr.call{value: share, gas: 100_000}("");
             require(ok, "recipient transfer failed");
-            remaining -= share;
+            distributed += share;
         }
 
-        // 剩余（未分配部分）归平台
-        if (remaining > 0) {
-            (bool ok, ) = platform.call{value: remaining, gas: 100_000}("");
+        // 平台实得 = 抽成 + 未分配完的余数
+        uint256 toPlatform = amount - distributed;
+        if (toPlatform > 0) {
+            (bool ok, ) = platform.call{value: toPlatform, gas: 100_000}("");
             require(ok, "platform transfer failed");
         }
     }
@@ -116,8 +154,10 @@ contract SonicMint {
     // ───────────────────────── 艺人：注册曲目 ─────────────────────────
 
     /**
+     * @param container 容器地址，须等于 opener.accountOf(cpuAt(cpu), tokenId)，且该容器已开启
+     * @param cpu       处理器编号，须指向 allowedProcessor（未设白名单时不限）
      * @param price     买断价（wei）；free = true 时忽略，否则必须 > 0
-     * @param royalties 收益方列表，bps 总和须 ≤ 10000；若为空则艺人拿 100%
+     * @param royalties 收益方列表，bps 相对「扣除平台抽成后」的金额计算，总和须 ≤ 10000；若为空则艺人拿 100%
      * @param partCount 分片数，0 或 1 表示单文件
      */
     function registerTrack(
@@ -138,6 +178,14 @@ contract SonicMint {
         require(bytes(audioPath).length > 0, "empty path");
         require(bytes(title).length > 0, "empty title");
         require(free || price > 0, "price = 0");
+
+        // 处理器与容器校验：处理器须为指定地址，容器须与 (cpu, tokenId) 匹配且已开启
+        // processor 由合约自行从工厂查得，不接受调用方传入，避免绕过白名单
+        address proc = IProcessorFactory(factory).cpuAt(cpu);
+        require(proc != address(0), "processor not found");
+        require(allowedProcessor == address(0) || proc == allowedProcessor, "processor not allowed");
+        require(IContainerOpener(opener).accountOf(proc, tokenId) == container, "container mismatch");
+        require(IContainerOpener(opener).isOpened(proc, tokenId), "container not opened");
 
         // 校验版税总和
         uint256 totalBps = 0;
@@ -287,6 +335,12 @@ contract SonicMint {
         require(msg.sender == platform, "only platform");
         monthlyFee = _fee;
         emit MonthlyFeeUpdated(_fee);
+    }
+
+    /// @notice 更换允许发行唱片的处理器；传 address(0) 表示不限制
+    function setAllowedProcessor(address _processor) external {
+        require(msg.sender == platform, "only platform");
+        allowedProcessor = _processor;
     }
 
     // ───────────────────────── 读取 ─────────────────────────

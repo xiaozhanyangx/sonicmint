@@ -11,10 +11,10 @@ const NETWORKS = {
     symbol: "OKB",
     rpc: "https://rpc.xlayer.tech",
     explorer: "https://www.okx.com/web3/explorer/xlayer",
-    siteRegistry:     "0x0000000000000000000000000000000000000000", // ← X Layer 部署后替换
-    containerOpener:  "0x0000000000000000000000000000000000000000",
-    processorFactory: "0x0000000000000000000000000000000000000000",
-    music:            "0x0000000000000000000000000000000000000000",
+    siteRegistry:     "0xd6efb7adcc9c83dc4924ad56f6a8e4e969b9adb6", // TapeOut 网站注册表（Base / X Layer 同址）
+    containerOpener:  "0x536add8f30f03b69f6fbf29d425a816a0dc50106", // TapeOut 容器开启器
+    processorFactory: "0x1f09daefa827f02cbb40967cc91b259763760761", // TapeOut 处理器工厂
+    music:            "0xDcFe709728E085cD59Bb10fd09AbA657BF68b087",
   },
 };
 
