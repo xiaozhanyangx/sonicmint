@@ -1,0 +1,19 @@
+{
+  "name": "sonicmint",
+  "version": "0.1.0",
+  "description": "链上音乐发行平台 · 基于 TapeOut 协议（音频上链 + 播放版税即时结算）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "node scripts/compile.js",
+    "deploy": "node scripts/deploy.js",
+    "upload-audio": "node scripts/upload-audio.js",
+    "publish-site": "node scripts/publish-site.js"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4"
+  },
+  "devDependencies": {
+    "solc": "^0.8.28"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "声刻 SonicMint · 链上曲库",
+  "short_name": "声刻",
+  "description": "Web3 链上音乐平台：永久存储、即时版税、订阅免费播放",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f3fa",
+  "theme_color": "#5b4be0",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

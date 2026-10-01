@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>发行规则 · 声刻</title>
+  <meta name="description" content="声刻 SonicMint 发行规则：如何在 TapeOut 链上发行唱片、版税结算方式、订阅与免费播放机制。" />
+  <meta name="theme-color" content="#5b4be0" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235b4be0'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle'%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E" />
+  <script>
+    try {
+      var t = localStorage.getItem("tapeout_theme");
+      if (t === "dark" || (!t && matchMedia("(prefers-color-scheme: dark)").matches))
+        document.documentElement.classList.add("dark");
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="nav">
+    <div class="nav__brand">
+      <a href="./index.html" style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;">
+        <span class="nav__logo">🎵</span>
+        <span class="nav__title" data-i18n="nav.brand">声刻</span>
+      </a>
+    </div>
+    <div class="nav__right">
+      <a href="./index.html" class="btn btn--ghost" data-i18n="nav.home">返回首页</a>
+      <div class="net-switch">
+        <button id="netBnb" class="btn btn--ghost btn--net" data-chain="56">BNB</button>
+        <button id="netXlayer" class="btn btn--ghost btn--net" data-chain="196">X Layer</button>
+      </div>
+      <span id="chainBadge" class="badge" data-i18n="nav.unconnected">未连接</span>
+    </div>
+    <button id="connectBtn" class="btn btn--primary nav__connect" data-i18n="nav.connect">连接钱包</button>
+    <button id="themeToggle" class="icon-btn" aria-label="切换深色模式">🌙</button>
+    <button id="langToggle" class="icon-btn lang-btn" aria-label="切换语言">中</button>
+    <button id="navToggle" class="nav__toggle" aria-label="菜单">
+      <span></span><span></span><span></span>
+    </button>
+  </header>
+
+  <!-- 移动端菜单 -->
+  <div id="navMenu" class="nav__menu">
+    <a href="./index.html" class="nav__menu-item" data-i18n="nav.menuLibrary">🎧 曲库</a>
+    <a href="./publish.html" class="nav__menu-item" data-i18n="nav.menuPublish">💿 发行唱片</a>
+    <div class="nav__menu-item nav__menu-net">
+      <span class="nav__menu-label" data-i18n="nav.net">网络</span>
+      <div class="net-switch">
+        <button id="netBnbM" class="btn btn--ghost btn--net" data-chain="56">BNB</button>
+        <button id="netXlayerM" class="btn btn--ghost btn--net" data-chain="196">X Layer</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="container">
+    <div class="rules-hero">
+      <h1 data-i18n="rules.title">发行规则</h1>
+      <p data-i18n="rules.desc">把你的音乐永久刻在链上。所有音频、封面、版税逻辑全部上链，无服务器、无中介、永久可播放。</p>
+    </div>
+
+    <!-- 核心特性 -->
+    <section style="margin-top:24px">
+      <div class="rules-grid">
+        <div class="rule-card">
+          <div class="rule-card__icon">💿</div>
+          <h3 data-i18n="rule.storage.title">永久上链存储</h3>
+          <p data-i18n="rule.storage.desc">音频文件通过 TapeOut DeWEB 协议直接存入 BNB Chain，只要链在运行，你的音乐就在。不依赖 IPFS、Arweave 或任何中心化服务器。</p>
+        </div>
+        <div class="rule-card">
+          <div class="rule-card__icon">⚖️</div>
+          <h3 data-i18n="rule.royalty.title">版税即时结算</h3>
+          <p data-i18n="rule.royalty.desc">每次付费播放的收入，由智能合约按你设定的比例即时分流给各收益方（艺人、制作人、作词、作曲…），无拖欠、无对账。</p>
+        </div>
+        <div class="rule-card">
+          <div class="rule-card__icon">🔐</div>
+          <h3 data-i18n="rule.ownership.title">可验证所有权</h3>
+          <p data-i18n="rule.ownership.desc">每首唱片绑定一个 Circuit NFT + ERC-6551 容器账户，所有权链上可查，收益权可组合、可转让。</p>
+        </div>
+        <div class="rule-card">
+          <div class="rule-card__icon">🌐</div>
+          <h3 data-i18n="rule.external.title">外部播放结算</h3>
+          <p data-i18n-html="rule.external.desc">第三方播放器只需调用合约 <code>play(trackId)</code> 即可触发版税结算，适合嵌入式播放场景。</p>
+        </div>
+        <div class="rule-card">
+          <div class="rule-card__icon">📦</div>
+          <h3 data-i18n="rule.sharding.title">无损分片支持</h3>
+          <p data-i18n="rule.sharding.desc">单文件超过 8.4MB 自动分片上传，播放时前端合并还原，支持高品质音频。</p>
+        </div>
+        <div class="rule-card">
+          <div class="rule-card__icon">👥</div>
+          <h3 data-i18n="rule.multiparty.title">多方版税分流</h3>
+          <p data-i18n="rule.multiparty.desc">一首歌可配置多个收益方（艺人、制作人、作词、作曲、发行方），按基点比例自动分配。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 发行流程 -->
+    <section class="card" style="margin-top:24px">
+      <h2 data-i18n="rules.flow.title">发行流程</h2>
+      <div class="callout" data-i18n-html="rules.flow.callout">发行前请确保你已拥有一个开通了容器的 TapeOut 电路（可在 <a href="https://id.tapeout.link" target="_blank">id.tapeout.link</a> 开通，约 0.08 BNB/月）。</div>
+
+      <div class="rules-step">
+        <div class="rules-step__num">1</div>
+        <div class="rules-step__body">
+          <strong data-i18n="rules.step1.title">准备素材</strong>
+          <p data-i18n="rules.step1.desc">音频文件（MP3/WAV/FLAC）、封面图（建议 1:1，≤8.4MB）、曲目名、艺人名。</p>
+        </div>
+      </div>
+      <div class="rules-step">
+        <div class="rules-step__num">2</div>
+        <div class="rules-step__body">
+          <strong data-i18n="rules.step2.title">填写发行信息</strong>
+          <p data-i18n="rules.step2.desc">在首页填写曲目名、艺人名、电路 #ID、处理器编号，上传音频和封面图。可选择性添加多个版税收益方。</p>
+        </div>
+      </div>
+      <div class="rules-step">
+        <div class="rules-step__num">3</div>
+        <div class="rules-step__body">
+          <strong data-i18n="rules.step3.title">上链存储</strong>
+          <p data-i18n="rules.step3.desc">点击"上传并注册"，音频和封面将逐块写入你的 TapeOut 容器，同时在合约中注册曲目信息。</p>
+        </div>
+      </div>
+      <div class="rules-step">
+        <div class="rules-step__num">4</div>
+        <div class="rules-step__body">
+          <strong data-i18n="rules.step4.title">上架完成</strong>
+          <p data-i18n="rules.step4.desc">曲目出现在曲库中，任何人都可以播放。每次播放触发版税结算，收入即时到账。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 结算规则 -->
+    <section class="card">
+      <h2 data-i18n="rules.settle.title">播放与结算规则</h2>
+
+      <h3 style="font-size:15px;margin:18px 0 10px" data-i18n="rules.settle.modes">三种播放模式</h3>
+      <div class="rules-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="rule-card" style="padding:16px">
+          <div class="rule-card__icon">🆓</div>
+          <h3 data-i18n="settle.free.title">免费播放</h3>
+          <p data-i18n="settle.free.desc">艺人勾选"免费唱片"后，任何人无需付费、无需订阅即可播放。<strong>不分钱、不计入订阅池子</strong>，纯推广用途。</p>
+        </div>
+        <div class="rule-card" style="padding:16px">
+          <div class="rule-card__icon">💸</div>
+          <h3 data-i18n="settle.paid.title">付费播放</h3>
+          <p data-i18n="settle.paid.desc">非订阅用户每次播放支付一定 BNB（默认 0.001 BNB）。收入即时按版税比例分流给各收益方，剩余归平台。</p>
+        </div>
+        <div class="rule-card" style="padding:16px">
+          <div class="rule-card__icon">🎫</div>
+          <h3 data-i18n="settle.sub.title">订阅播放</h3>
+          <p data-i18n="settle.sub.desc">订阅用户（月费默认 0.01 BNB）可免费播放非免费曲目，播放次数计入池子，按占比结算给艺人。</p>
+        </div>
+      </div>
+
+      <div class="callout" style="margin-top:18px" data-i18n-html="rules.sybil">
+        <strong>抗女巫机制：</strong>订阅用户的免费播放需持有至少一个 TapeOut Circuit NFT，防止刷量稀释版税池。
+      </div>
+
+      <h3 style="font-size:15px;margin:18px 0 10px" data-i18n="rules.royalty.title2">版税分配</h3>
+      <p style="font-size:13px;color:var(--text-2)" data-i18n-html="rules.royalty.desc2">
+        注册时可配置多个收益方及其分成比例（基点，10000 = 100%）。例如艺人 70%、制作人 20%、平台 10%。若未配置，默认艺人拿 100%。
+        所有分流均通过智能合约 <code>.call{value: share}</code> 即时执行，合约不留余额，无资金沉淀风险。
+      </p>
+    </section>
+
+    <!-- 存储规格 -->
+    <section class="card">
+      <h2 data-i18n="rules.storage.title">存储规格与限制</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:10px 8px;color:var(--text-2)" data-i18n="storage.item">项目</th>
+            <th style="text-align:left;padding:10px 8px;color:var(--text-2)" data-i18n="storage.spec">规格</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 8px" data-i18n="storage.size">单文件上限</td>
+            <td style="padding:10px 8px" data-i18n="storage.sizeV">8.4 MB（超出自动分片）</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 8px" data-i18n="storage.audioFmt">支持音频格式</td>
+            <td style="padding:10px 8px" data-i18n="storage.audioFmtV">MP3 · WAV · FLAC</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 8px" data-i18n="storage.imgFmt">支持图片格式</td>
+            <td style="padding:10px 8px" data-i18n="storage.imgFmtV">JPG · PNG · WebP · GIF</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 8px" data-i18n="storage.network">存储网络</td>
+            <td style="padding:10px 8px" data-i18n="storage.networkV">BNB Chain（TapeOut DeWEB 容器）</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 8px" data-i18n="storage.fee">容器月费</td>
+            <td style="padding:10px 8px" data-i18n="storage.feeV">约 0.08 BNB（由 TapeOut 收取，非本平台）</td>
+          </tr>
+          <tr>
+            <td style="padding:10px 8px" data-i18n="storage.permanent">存储永久</td>
+            <td style="padding:10px 8px" data-i18n="storage.permanentV">✓ 链上数据不可删除，永久可访问</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 注意事项 -->
+    <section class="card">
+      <h2 data-i18n="rules.notes.title">注意事项</h2>
+      <ul style="font-size:13px;color:var(--text-2);line-height:2;padding-left:20px;margin-top:8px">
+        <li data-i18n="rules.note1">上传需消耗 BNB Gas 费，文件越大 Gas 越高（建议单首歌控制在 8.4MB 以内）。</li>
+        <li data-i18n="rules.note2">请确保你拥有上传音频的版权或已获得授权，平台不对内容版权负责。</li>
+        <li data-i18n="rules.note3">版税分配比例一旦注册不可修改，请仔细核对后再提交。</li>
+        <li data-i18n-html="rules.note4">订阅池子的结算需手动触发 <code>settleTrack</code>，建议定期结算。</li>
+        <li data-i18n="rules.note5">本平台处于早期阶段，合约代码已审计思路但未经过正式安全审计，建议小额测试。</li>
+      </ul>
+    </section>
+
+    <div style="text-align:center;margin:30px 0">
+      <a href="./index.html" class="btn btn--primary" data-i18n="rules.cta">我已了解，去发行 →</a>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p data-i18n="footer.text">音频存于 TapeOut 链上容器 · 版税合约即时结算 · 无服务器</p>
+    <p style="margin-top:6px"><a href="https://tapeout.link" target="_blank">powered by TapeOut</a></p>
+  </footer>
+
+  <script src="./ethers.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js'"></script>
+  <script src="./lang.js"></script>
+  <script src="./app.js"></script>
