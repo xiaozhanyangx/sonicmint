@@ -25,6 +25,14 @@ const CHUNK_MAX = 24000;
 const FILE_MAX  = 8_400_000;
 const GATEWAY   = "https://{id}-{cpu}.tapekit.org";
 
+// 唯一允许发行的处理器编号（须与合约 allowedProcessor 一致）
+const PROCESSOR_NO = 260;
+// 电路 NFT（处理器合约）只读接口
+const CIRCUIT_ABI = [
+  "function ownerOf(uint256) view returns (address)",
+  "function nextId() view returns (uint256)",
+];
+
 // ───────── ABI（v2）─────────
 const SITE_REGISTRY_ABI = [
   "function putFile(address container, string path, string contentType, bytes32 sha256Hash, bytes firstChunk)",
@@ -69,14 +77,10 @@ const shortAddr = (a) => a.slice(0, 6) + "…" + a.slice(-4);
 const escapeHtml = (s) => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
 const sym = () => currentNetwork.symbol;
 
-// ───────── Demo 模式（核心合约地址未配置时自动启用）─────────
-const isDemo = () => !!(window.DEMO && DEMO.isActive());
-
-// 资源 URL：完整地址（demo 上传的 blob）原样返回，demo 预置走本地目录，链上曲目走网关
+// 资源 URL：完整地址原样返回，链上曲目走网关
 function fileUrl(t, path) {
   if (!path) return "";
   if (/^(blob:|data:|https?:)/.test(path)) return path;
-  if (t.base) return `${t.base}/${path}`;
   return `${GATEWAY.replace("{id}", t.tokenId).replace("{cpu}", t.cpu)}/${path}`;
 }
 
@@ -106,7 +110,6 @@ async function sha256Bytes(bytes) {
 
 // ───────── 钱包 ─────────
 async function connectWallet() {
-  if (isDemo()) { enterDemo(); return; } // 演示模式无需钱包
   if (!window.ethereum) { toast("请安装 MetaMask / OKX Wallet 等 EVM 钱包", "err"); return; }
   try {
     await window.ethereum.request({ method: "eth_requestAccounts" });
@@ -142,8 +145,8 @@ async function connectWallet() {
 
     // 更新网络相关显示
     updateNetworkLabels();
-    // 若发行页已填处理器编号，自动解析
-    if ($("inCpu")) resolveProcessor();
+    // 若发行页已渲染电路下拉，连接后重新加载
+    if ($("inCircuit")) loadCircuits();
     await refreshSubscription();
     if ($("refreshBtn")) loadTracks();
     else loadCreatorPanel(); // 发行页：只刷新创作者面板
@@ -151,27 +154,6 @@ async function connectWallet() {
     console.error(e);
     toast("连接失败：" + e.message, "err");
   }
-}
-
-// ───────── 进入演示模式：用本地 mock 合约替换真实合约 ─────────
-function enterDemo() {
-  account = DEMO.ACCOUNT;
-  musicContract    = DEMO.music();
-  registryContract = DEMO.registry();
-  openerContract   = DEMO.opener();
-  factoryContract  = DEMO.factory();
-
-  $("connectBtn").textContent = shortAddr(account);
-  const badge = $("chainBadge");
-  if (badge) {
-    badge.setAttribute("data-i18n", "nav.demo"); // 切换语言时同步
-    badge.textContent = T("nav.demo");
-    badge.classList.add("badge--ok");
-  }
-
-  updateNetworkLabels();
-  if ($("inCpu")) resolveProcessor();
-  refreshSubscription();
 }
 
 // ───────── 切换网络 ─────────
@@ -216,6 +198,12 @@ async function refreshSubscription() {
   if (!musicContract) return;
   const subBtn = $("subscribeBtn"), subBadge = $("subBadge"), poolInfo = $("poolInfo");
   if (!subBtn || !subBadge) return; // 发行页/规则页无此区域
+  if (!account) { // 未连接：隐藏订阅态，只显示池子数据
+    subBtn.hidden = true;
+    subBadge.hidden = true;
+    updateSubCard();
+    return;
+  }
   try {
     const subscribed = await musicContract.isSubscriber(account);
     const monthlyFee = await musicContract.monthlyFee();
@@ -336,13 +324,14 @@ function resetUploadForm() {
 async function uploadAudio() {
   const title = $("inTitle").value.trim();
   const artist = $("inArtist").value.trim();
-  const tokenId = parseInt($("inTokenId").value);
-  const cpu = parseInt($("inCpu").value);
+  const tokenId = parseInt($("inCircuit").value);
+  const cpu = PROCESSOR_NO;
   const file = $("inFile").files[0];
   const coverFile = $("inCover").files[0];
   const status = $("uploadStatus");
 
-  if (!title || !artist || !tokenId || !file) { toast("请填写完整信息并选择音频文件", "err"); return; }
+  if (!tokenId) { toast(T("pub.circuitPick"), "err"); return; }
+  if (!title || !artist || !file) { toast("请填写完整信息并选择音频文件", "err"); return; }
 
   // 版税校验
   const totalBps = royaltyRecipients.reduce((s, r) => s + r.bps, 0);
@@ -356,27 +345,6 @@ async function uploadAudio() {
 
   $("uploadBtn").disabled = true;
   status.style.color = "";
-
-  // 演示模式：本地模拟发行，不上链
-  if (isDemo()) {
-    try {
-      status.textContent = "演示模式：本地模拟上传…";
-      const r = await DEMO.upload({
-        title, artistName: artist, tokenId, cpu, file, coverFile,
-        price: priceWei, free: isFree,
-      });
-      status.textContent = `✓ 发行成功！曲目 #${r.trackId}（演示数据，仅本次会话可见）`;
-      status.style.color = "var(--accent)";
-      resetUploadForm();
-      loadCreatorPanel();
-    } catch (e) {
-      console.error(e);
-      status.textContent = "✗ " + e.message;
-      status.style.color = "var(--danger)";
-      $("uploadBtn").disabled = false;
-    }
-    return;
-  }
 
   try {
     status.textContent = "读取容器…";
@@ -486,9 +454,10 @@ async function loadTracks() {
 
 // 创作者面板：发行页无曲库列表，单独拉数据
 async function loadCreatorPanel() {
-  if (!musicContract) { updateCreatorPanel(); return; }
+  if (!musicContract) { updateCreatorPanel(); loadCircuits(); return; }
   try { await fetchTracks(); } catch (e) { console.error(e); }
   updateCreatorPanel();
+  loadCircuits();
 }
 
 // 按搜索词过滤后的可见曲目（保留真实索引 = 合约 trackId）
@@ -685,7 +654,7 @@ function closeQueue() { const q = $("queue"); if (q) q.hidden = true; }
 async function playTrack(idx) {
   const t = tracksCache[idx];
   if (!t) return;
-  if (!canPlay(idx)) { toast(T("player.locked"), "err"); return; }
+  if (!canPlay(idx)) { toast(account ? T("player.locked") : "请先连接钱包", "err"); return; }
 
   currentTrackIdx = idx;
   markPlaying();
@@ -726,6 +695,7 @@ async function playTrack(idx) {
 async function doBuy(idx, btn) {
   const t = tracksCache[idx];
   if (!t || !musicContract) return;
+  if (!account) { toast("请先连接钱包", "err"); return; }
   const label = btn ? btn.textContent : "";
   try {
     if (btn) { btn.disabled = true; btn.textContent = "支付中…"; }
@@ -821,26 +791,64 @@ function updateCreatorPanel() {
   );
 }
 
-// ───────── 处理器解析（显式指定处理器）─────────
-async function resolveProcessor() {
-  const cpuInput = $("inCpu");
-  const info = $("processorInfo");
-  if (!cpuInput || !info) return;
-  const cpu = parseInt(cpuInput.value);
-  if (isNaN(cpu) || cpu < 0 || !factoryContract) {
-    info.textContent = "";
+// ───────── 电路下拉：枚举当前钱包在指定处理器下持有的电路 ─────────
+async function loadCircuits() {
+  const sel = $("inCircuit"), info = $("circuitInfo");
+  if (!sel) return;
+  if (!musicContract || !factoryContract || !openerContract || !account) {
+    sel.disabled = true;
+    sel.innerHTML = `<option value="">${T("pub.circuitConnect")}</option>`;
+    syncCircuitInfo();
     return;
   }
+  sel.disabled = false;
+  sel.innerHTML = `<option value="">${T("pub.circuitLoading")}</option>`;
   try {
-    info.textContent = "查询中…";
-    info.style.color = "var(--muted)";
-    const processor = await factoryContract.cpuAt(cpu);
-    info.innerHTML = `处理器 <code>${shortAddr(processor)}</code>`;
-    info.style.color = "var(--success)";
+    const processor = await factoryContract.cpuAt(PROCESSOR_NO);
+    if (!processor || /^0x0+$/.test(processor)) throw new Error(`处理器 #${PROCESSOR_NO} 不存在`);
+    const circuits = new ethers.Contract(processor, CIRCUIT_ABI, provider);
+    const nextId = Number(await circuits.nextId()); // #ID 从 1 开始，nextId 为已发出的最大编号
+
+    const mine = [];
+    for (let id = 1; id <= nextId + 5; id++) {
+      let owner;
+      try { owner = await circuits.ownerOf(id); } catch (e) { continue; } // 未铸造的 #ID 会 revert
+      if (owner.toLowerCase() !== account.toLowerCase()) continue;
+      const opened = await openerContract.isOpened(processor, id).catch(() => false);
+      mine.push({ id, opened });
+    }
+
+    if (mine.length === 0) {
+      sel.disabled = true;
+      sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;
+      syncCircuitInfo();
+      return;
+    }
+    sel.innerHTML = mine
+      .map((c) => `<option value="${c.id}" data-opened="${c.opened}">#${c.id} · ${c.opened ? T("pub.circuitOpened") : T("pub.circuitNotOpened")}</option>`)
+      .join("");
+    syncCircuitInfo();
   } catch (e) {
-    info.textContent = "查询失败：" + (e.reason || e.message);
+    sel.disabled = true;
+    sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;
+    info.textContent = "加载电路失败：" + (e.reason || e.message);
     info.style.color = "var(--danger)";
   }
+}
+
+// 选中电路的容器状态提示
+function syncCircuitInfo() {
+  const sel = $("inCircuit"), info = $("circuitInfo");
+  if (!sel || !info) return;
+  const opt = sel.selectedOptions[0];
+  if (!opt || !opt.value) {
+    info.textContent = T("pub.circuitHint");
+    info.style.color = "var(--muted)";
+    return;
+  }
+  const opened = opt.dataset.opened === "true";
+  info.textContent = `#${opt.value} · ${opened ? T("pub.circuitOpened") : T("pub.circuitNotOpened")}`;
+  info.style.color = opened ? "var(--success)" : "var(--danger)";
 }
 
 // ───────── 初始化 ─────────
@@ -848,8 +856,9 @@ window.addEventListener("DOMContentLoaded", () => {
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
-  // 合约地址未配置 → 直接进入演示模式，无需连接钱包
-  if (isDemo()) enterDemo();
+  // 只读合约：曲库读取全是 view 调用，无需钱包即可浏览
+  provider = new ethers.JsonRpcProvider(currentNetwork.rpc);
+  musicContract = new ethers.Contract(currentNetwork.music, SONICMINT_ABI, provider);
   // 通用：所有页面
   const connectBtn = $("connectBtn");
   if (connectBtn) connectBtn.addEventListener("click", connectWallet);
@@ -906,12 +915,9 @@ window.addEventListener("DOMContentLoaded", () => {
         inFree.addEventListener("change", syncPrice);
         syncPrice();
       }
-      // 处理器编号输入变化时自动解析处理器地址
-      const cpuInput = $("inCpu");
-      if (cpuInput) {
-        cpuInput.addEventListener("change", resolveProcessor);
-        cpuInput.addEventListener("blur", resolveProcessor);
-      }
+      // 电路下拉：切换时刷新容器状态提示
+      const circuitSel = $("inCircuit");
+      if (circuitSel) circuitSel.addEventListener("change", syncCircuitInfo);
       $("addRoyaltyBtn").addEventListener("click", () => {
         royaltyRecipients.push({ addr: "", bps: 0 });
         renderRoyaltyList();

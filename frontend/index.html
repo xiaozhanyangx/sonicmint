@@ -157,16 +157,10 @@
             <label data-i18n="pub.artist">艺人名</label>
             <input id="inArtist" type="text" placeholder="你的名字或艺名" data-i18n-ph="pub.artistPh" />
           </div>
-          <div class="form__row form__row--2">
-            <div>
-              <label data-i18n="pub.circuit">电路 #ID</label>
-              <input id="inTokenId" type="number" min="1" placeholder="如 4246" data-i18n-ph="pub.circuitPh" />
-            </div>
-            <div>
-              <label data-i18n="pub.cpu">处理器编号</label>
-              <input id="inCpu" type="number" min="0" value="0" placeholder="0" />
-              <span id="processorInfo" class="muted small"></span>
-            </div>
+          <div class="form__row">
+            <label data-i18n="pub.circuit">电路</label>
+            <select id="inCircuit"></select>
+            <span id="circuitInfo" class="muted small" data-i18n="pub.circuitHint">仅列出处理器 #260 下你持有的电路；容器未开通的需先去 id.tapeout.link 开通。</span>
           </div>
           <div class="form__row">
             <label data-i18n="pub.audio">音频文件</label>
@@ -310,7 +304,6 @@
 
   <script src="./ethers.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js'"></script>
   <script src="./lang.js"></script>
-  <script src="./demo.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

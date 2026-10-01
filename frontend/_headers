@@ -1,20 +1,27 @@
 # 入口与 Service Worker 不缓存，保证发布后即时生效
+# 注意：Pages 会把 /x.html 308 跳到 /x，实际路径不带后缀，两种都要写
+/
+  Cache-Control: no-cache
 /index.html
   Cache-Control: no-cache
+/publish
+  Cache-Control: no-cache
 /publish.html
+  Cache-Control: no-cache
+/rules
   Cache-Control: no-cache
 /rules.html
   Cache-Control: no-cache
 /sw.js
   Cache-Control: no-cache
 
-# 其余静态资源：无内容哈希，缓存 1 小时
+# 应用资源体积小，用协商缓存换发布即时生效
 /app.js
-  Cache-Control: public, max-age=3600
+  Cache-Control: no-cache
 /lang.js
-  Cache-Control: public, max-age=3600
+  Cache-Control: no-cache
 /style.css
-  Cache-Control: public, max-age=3600
+  Cache-Control: no-cache
 /ethers.min.js
   Cache-Control: public, max-age=31536000, immutable
 

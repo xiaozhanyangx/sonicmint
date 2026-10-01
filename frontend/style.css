@@ -205,13 +205,16 @@ a { color: var(--primary); text-decoration: none; }
 .form__row--2 > div { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .form__row input[type="text"],
 .form__row input[type="number"],
-.form__row input[type="file"] {
+.form__row input[type="file"],
+.form__row select {
   padding: 10px 12px; background: var(--bg);
   border: 1px solid var(--border); border-radius: var(--r-sm);
   color: var(--text); font-size: 14px; font-family: inherit;
   transition: border-color .15s;
 }
-.form__row input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.form__row select { cursor: pointer; }
+.form__row input:focus,
+.form__row select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
 .form__row input[type="file"] { cursor: pointer; }
 .form__actions { display: flex; align-items: center; gap: 12px; padding-top: 4px; }
 
@@ -315,12 +318,6 @@ a { color: var(--primary); text-decoration: none; }
 .tag--free { background: rgba(16,185,129,.12); color: var(--success); }
 .tag--own { background: rgba(16,185,129,.12); color: var(--success); }
 .tag--price { background: rgba(245,158,11,.14); color: var(--accent); }
-
-/* 处理器信息 */
-#processorInfo code {
-  font-family: "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px; background: var(--bg); padding: 2px 6px; border-radius: 4px;
-}
 
 /* ───────── 迷你播放条（底部浮窗）───────── */
 .mini {
@@ -602,7 +599,8 @@ body.has-mini { padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px)); }
   .form { gap: 14px; }
   .form__row input[type="text"],
   .form__row input[type="number"],
-  .form__row input[type="file"] {
+  .form__row input[type="file"],
+  .form__row select {
     padding: 12px 14px; font-size: 16px; min-height: 46px; /* 16px 防止 iOS 聚焦缩放 */
   }
   .form__row label { font-size: 12px; }
