@@ -13,18 +13,8 @@
       },
       {
         "internalType": "uint256",
-        "name": "_minPlayPrice",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
         "name": "_monthlyFee",
         "type": "uint256"
-      },
-      {
-        "internalType": "address",
-        "name": "_processorFactory",
-        "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
@@ -61,6 +51,12 @@
       {
         "indexed": false,
         "internalType": "uint256",
+        "name": "months",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
       }
@@ -85,18 +81,37 @@
       },
       {
         "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
         "internalType": "bool",
-        "name": "subscribed",
+        "name": "unlocked",
         "type": "bool"
       }
     ],
     "name": "TrackPlayed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "trackId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "buyer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "TrackPurchased",
     "type": "event"
   },
   {
@@ -160,6 +175,74 @@
     ],
     "name": "TrackSettled",
     "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_MONTHS",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MONTH",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "trackId",
+        "type": "uint256"
+      }
+    ],
+    "name": "buy",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "offset",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "limit",
+        "type": "uint256"
+      }
+    ],
+    "name": "getPurchased",
+    "outputs": [
+      {
+        "internalType": "bool[]",
+        "name": "result",
+        "type": "bool[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
     "inputs": [
@@ -236,6 +319,11 @@
           {
             "internalType": "uint256",
             "name": "createdAt",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "price",
             "type": "uint256"
           },
           {
@@ -371,6 +459,11 @@
             "type": "uint256"
           },
           {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
             "internalType": "bool",
             "name": "free",
             "type": "bool"
@@ -403,19 +496,6 @@
         "internalType": "bool",
         "name": "",
         "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "minPlayPrice",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -470,17 +550,28 @@
     ],
     "name": "play",
     "outputs": [],
-    "stateMutability": "payable",
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "processorFactory",
-    "outputs": [
+    "inputs": [
       {
         "internalType": "address",
         "name": "",
         "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "purchased",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -529,6 +620,11 @@
         "type": "string"
       },
       {
+        "internalType": "uint256",
+        "name": "price",
+        "type": "uint256"
+      },
+      {
         "internalType": "bool",
         "name": "free",
         "type": "bool"
@@ -559,19 +655,6 @@
         "type": "uint256"
       }
     ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_price",
-        "type": "uint256"
-      }
-    ],
-    "name": "setMinPlayPrice",
-    "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
   },
@@ -628,7 +711,13 @@
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "months",
+        "type": "uint256"
+      }
+    ],
     "name": "subscribe",
     "outputs": [],
     "stateMutability": "payable",
@@ -794,6 +883,11 @@
       {
         "internalType": "uint256",
         "name": "createdAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "price",
         "type": "uint256"
       },
       {

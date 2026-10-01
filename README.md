@@ -14,7 +14,7 @@
 - [快速开始](#快速开始)
 - [合约部署](#合约部署)
 - [前端发布到 TapeOut](#前端发布到-tapeout)
-- [多链支持](#多链支持)
+- [网络配置](#网络配置)
 - [合约 API](#合约-api)
 - [播放与结算规则](#播放与结算规则)
 - [存储规格](#存储规格)
@@ -31,7 +31,7 @@
 3. **版税即时结算** — 播放付费按预设比例即时分流给艺人、制作人等多方收益方
 4. **全链上无服务器** — 前端、音频、合约逻辑全部运行在链上
 
-支持 **BNB Chain** 和 **X Layer** 两条链。
+运行在 **X Layer**（OKX 的 zkEVM L2）上。
 
 ---
 
@@ -50,14 +50,13 @@
 | PWA | manifest + Service Worker，可安装到主屏幕、离线可用 |
 | 移动端适配 | 汉堡菜单、全宽触摸目标（≥44px）、悬浮播放器 |
 
-| 🎵 永久唱片 | 音频存于 BNB Chain / X Layer，链在数据在 |
+| 🎵 永久唱片 | 音频存于 X Layer，链在数据在 |
 | 💰 即时版税 | 付费播放按比例即时分流，无中间方拖欠 |
 | 👥 多方版税 | 每首歌可配置多个收益方（艺人/制作人/作词/作曲） |
 | 📡 订阅制 | 月费进池子，按播放占比月底分流给艺人 |
 | 🛡️ 抗女巫 | 订阅免费播放需持有 TapeOut Circuit NFT |
 | 🆓 免费唱片 | 可标记为免费，所有人可听（不分钱不计池） |
 | 🎧 无损分片 | 单文件 >8.4MB 自动分片上传，前端合并播放 |
-| 🌐 多链支持 | BNB Chain + X Layer，一键切换 |
 | 🖼️ 封面图 | 支持上传唱片封面，存链上 |
 
 ---
@@ -99,7 +98,7 @@
 - **钱包交互**：ethers.js v6
 - **链上存储**：TapeOut SiteRegistry（DeWEB）
 - **编译**：solc 0.8.28
-- **支持链**：BNB Chain (56)、X Layer (196)
+- **支持链**：X Layer (196)
 
 ---
 
@@ -139,7 +138,7 @@ tapeout-music/
 
 - Node.js ≥ 18
 - 一个 EVM 钱包（MetaMask / OKX Wallet 等）
-- 钱包中有 BNB 或 OKB 用于支付 Gas
+- 钱包中有 OKB 用于支付 Gas
 
 ### 安装依赖
 
@@ -168,10 +167,12 @@ npx serve frontend
 
 ## 合约部署
 
-### 部署到 BNB Chain
+### 部署到 X Layer
 
 ```bash
 PRIVATE_KEY=0x你的私钥 \
+RPC_URL=https://rpc.xlayer.tech \
+PROCESSOR_FACTORY=0xX Layer 上的 TapeOut ProcessorFactory \
 PLATFORM=0x平台收款地址 \
 PLATFORM_BPS=1000 \
 MIN_PLAY_PRICE=0 \
@@ -185,21 +186,11 @@ npm run deploy
 | `PLATFORM` | 部署者地址 | 平台收益收款地址 |
 | `PLATFORM_BPS` | `1000` (10%) | 付费播放时平台分成（基点） |
 | `MIN_PLAY_PRICE` | `0` | 单次付费播放最低价（wei） |
-| `MONTHLY_FEE` | `0.01 BNB` | 订阅月费（wei） |
-| `RPC_URL` | BNB 主网 RPC | 可覆盖为其他链 RPC |
+| `MONTHLY_FEE` | `0.01 OKB` | 订阅月费（wei） |
+| `RPC_URL` | X Layer RPC | 可覆盖为其他链 RPC |
+| `PROCESSOR_FACTORY` | 待填 | X Layer 上的 TapeOut ProcessorFactory 地址 |
 
-部署成功后会输出合约地址，将其填入 `frontend/app.js` 的 `NETWORKS[56].music`。
-
-### 部署到 X Layer
-
-```bash
-PRIVATE_KEY=0x你的私钥 \
-RPC_URL=https://rpc.xlayer.tech \
-PROCESSOR_FACTORY=0xXLayer上的ProcessorFactory地址 \
-npm run deploy
-```
-
-将输出的合约地址填入 `frontend/app.js` 的 `NETWORKS[196].music`，同时填入 X Layer 的核心合约地址。
+将输出的合约地址填入 `frontend/app.js` 的 `NETWORKS[196].music`，同时填入 X Layer 的核心合约地址（SiteRegistry / ContainerOpener / ProcessorFactory）。
 
 ---
 
@@ -209,7 +200,7 @@ npm run deploy
 
 ### 前置条件
 
-1. 拥有一个已开通容器的 TapeOut Circuit（在 [id.tapeout.link](https://id.tapeout.link) 开通，月费 0.08 BNB）
+1. 拥有一个已开通容器的 TapeOut Circuit（在 [id.tapeout.link](https://id.tapeout.link) 开通，月费 0.08 OKB）
 2. 知道 Circuit 的 `tokenId` 和处理器编号 `cpu`
 
 ### 发布
@@ -227,23 +218,19 @@ npm run publish-site
 
 ---
 
-## 多链支持
+## 网络配置
 
-项目支持 **BNB Chain** 和 **X Layer**，在 `frontend/app.js` 中通过 `NETWORKS` 配置：
+项目运行在 **X Layer** 上，在 `frontend/app.js` 中通过 `NETWORKS` 配置：
 
 ```js
 const NETWORKS = {
-  56: {  // BNB Chain
-    name: "BNB Chain", symbol: "BNB",
-    siteRegistry:     "0xd006ffdd...",
-    containerOpener:  "0x021745DE...",
-    processorFactory: "0x68224F66...",
-    music:            "0x...",  // 部署后填入
-  },
   196: {  // X Layer
     name: "X Layer", symbol: "OKB",
     rpc: "https://rpc.xlayer.tech",
-    siteRegistry:     "0x...",  // 填入 X Layer 核心合约地址
+    explorer: "https://www.okx.com/web3/explorer/xlayer",
+    siteRegistry:     "0x...",  // TapeOut 官方 X Layer 地址
+    containerOpener:  "0x...",
+    processorFactory: "0x...",
     music:            "0x...",  // 部署后填入
   },
 };
@@ -251,15 +238,14 @@ const NETWORKS = {
 
 ### 网络切换
 
-- 导航栏有 **BNB / X Layer** 切换按钮
+- 导航栏有 **X Layer** 切换按钮
 - 点击自动调用钱包 `wallet_switchEthereumChain`
 - 未添加的网络会自动 `wallet_addEthereumChain`
-- 切换后页面自动重载，加载对应链的合约
-- 所有金额显示自动切换代币符号（BNB ↔ OKB）
+- 切换后加载 X Layer 上的合约
 
-### X Layer 部署须知
+### 部署须知
 
-X Layer 的 TapeOut 核心合约地址（SiteRegistry / ContainerOpener / ProcessorFactory）需要从 TapeOut 官方文档获取，然后填入 `NETWORKS[196]`。
+X Layer 的 TapeOut 核心合约地址（SiteRegistry / ContainerOpener / ProcessorFactory）需要从 TapeOut 官方文档获取，然后填入 `NETWORKS[196]` 与 `scripts/` 中同名常量。
 
 ---
 
@@ -350,9 +336,9 @@ struct RoyaltyRecipient {
 | 单文件上限 | 8.4 MB（超过自动分片） |
 | 支持格式 | MP3 / WAV / FLAC / OGG |
 | 封面格式 | JPG / PNG / WebP（建议 1:1） |
-| 存储网络 | BNB Chain / X Layer |
+| 存储网络 | X Layer |
 | 访问方式 | `https://{tokenId}-{cpu}.tapekit.org/{path}` |
-| 容器月费 | 0.08 BNB（TapeOut 官方收费） |
+| 容器月费 | 0.08 OKB（TapeOut 官方收费） |
 
 ### 分片机制
 
@@ -366,7 +352,7 @@ struct RoyaltyRecipient {
 
 **Q: 发行一张唱片需要多少钱？**
 
-A: 主要成本是 Gas 费（存储音频到链上）。一首 3-4 分钟 MP3（约 4MB）在 BNB Chain 上通常几美元。容器月费 0.08 BNB 由 TapeOut 收取。
+A: 主要成本是 Gas 费（存储音频到链上）。一首 3-4 分钟 MP3（约 4MB）在 X Layer 上通常几美分。容器月费 0.08 OKB 由 TapeOut 收取。
 
 **Q: 免费唱片艺人怎么赚钱？**
 
@@ -384,9 +370,9 @@ A: FLAC/WAV 文件超过 8.4MB 时会自动分片上传，播放时前端合并�
 
 A: 外部播放平台只需集成合约的 `play(trackId)` 函数，调用时传入播放费，合约即时按比例分流版税。
 
-**Q: 如何切换到 X Layer？**
+**Q: 为什么只支持 X Layer？**
 
-A: 1) 在 X Layer 部署音乐合约；2) 填入 X Layer 核心合约地址到 `NETWORKS[196]`；3) 用户在导航栏点击 X Layer 切换。
+A: 聚焦单链可降低跨链成本与状态同步复杂度。1) 在 X Layer 部署音乐合约；2) 填入 X Layer 核心合约地址到 `NETWORKS[196]`；3) 用户连接钱包后自动识别，未在 X Layer 时可点击导航栏按钮切换。
 
 ---
 

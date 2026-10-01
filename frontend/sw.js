@@ -1,5 +1,5 @@
 /* 声刻 SonicMint PWA Service Worker：离线缓存静态资源 */
-const CACHE = "sonicmint-v1";
+const CACHE = "sonicmint-v28";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,6 +8,7 @@ const ASSETS = [
   "./style.css",
   "./app.js",
   "./lang.js",
+  "./demo.js",
   "./ethers.min.js",
   "./manifest.json",
   "./icon.svg",

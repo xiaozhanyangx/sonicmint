@@ -19,13 +19,14 @@ if (!PRIVATE_KEY || !TOKEN_ID) {
   process.exit(1);
 }
 
-const RPC_URL = process.env.RPC_URL || "https://bsc-dataseed.bnbchain.org";
+const RPC_URL = process.env.RPC_URL || "https://rpc.xlayer.tech";
 const FRONTEND_DIR = process.env.FRONTEND_DIR || "./frontend";
 const FALLBACK = process.env.FALLBACK || "index.html";
 
-const SITE_REGISTRY = "0xd006ffdd5Ae313B17729621A00999cD3C71CE5e6";
-const CONTAINER_OPENER = "0x021745DE2f42A7839d96f2d3634d0294487D81F1";
-const PROCESSOR_FACTORY = "0x68224F668083c29e9800Be2a646d42d18cedF7e2";
+// TapeOut 核心合约地址（X Layer 部署后替换）
+const SITE_REGISTRY = "0x0000000000000000000000000000000000000000";
+const CONTAINER_OPENER = "0x0000000000000000000000000000000000000000";
+const PROCESSOR_FACTORY = "0x0000000000000000000000000000000000000000";
 
 const CHUNK_MAX = 24000;
 
@@ -126,7 +127,7 @@ async function main() {
 
   console.log("\n✓ 发布完成！");
   console.log(`网关预览: https://${TOKEN_ID}-${CPU}.tapekit.org/`);
-  console.log("（需开通容器名字：0.08 BNB/月，DomainBinding.bind）");
+  console.log("（需开通容器名字：0.08 OKB/月，DomainBinding.bind）");
 }
 
 main().catch((e) => { console.error("\n✗", e.reason || e.message); process.exit(1); });

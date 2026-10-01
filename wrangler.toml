@@ -1,0 +1,4 @@
+# Cloudflare Pages 部署配置
+# 部署：npm run deploy:web
+name = "sonicmint"
+pages_build_output_dir = "frontend"

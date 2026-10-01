@@ -8,7 +8,8 @@
     "compile": "node scripts/compile.js",
     "deploy": "node scripts/deploy.js",
     "upload-audio": "node scripts/upload-audio.js",
-    "publish-site": "node scripts/publish-site.js"
+    "publish-site": "node scripts/publish-site.js",
+    "deploy:web": "npx --yes wrangler@latest pages deploy frontend --project-name sonicmint --branch main"
   },
   "dependencies": {
     "ethers": "^6.13.4"

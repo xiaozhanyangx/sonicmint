@@ -4,128 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>发行唱片 · 声刻</title>
-  <meta name="description" content="在 TapeOut 链上发行你的唱片，音频永久上链，版税即时结算。" />
-  <meta name="theme-color" content="#5b4be0" />
-  <link rel="manifest" href="./manifest.json" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235b4be0'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle'%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E" />
-  <script>
-    try {
-      var t = localStorage.getItem("tapeout_theme");
-      if (t === "dark" || (!t && matchMedia("(prefers-color-scheme: dark)").matches))
-        document.documentElement.classList.add("dark");
-    } catch (e) {}
-  </script>
-  <link rel="stylesheet" href="./style.css" />
+  <meta name="robots" content="noindex" />
+  <!-- 旧地址兼容：发行已并入首页 Tab，跳转到 #publish 面板 -->
+  <meta http-equiv="refresh" content="0; url=./index.html#publish" />
+  <link rel="canonical" href="./index.html#publish" />
+  <script>location.replace("./index.html#publish");</script>
 </head>
 <body>
-  <header class="nav">
-    <div class="nav__brand">
-      <a href="./index.html" style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;">
-        <span class="nav__logo">🎵</span>
-        <span class="nav__title" data-i18n="nav.brand">声刻</span>
-      </a>
-    </div>
-    <div class="nav__right">
-      <a href="./index.html" class="btn btn--ghost" data-i18n="nav.library">曲库</a>
-      <a href="./rules.html" class="btn btn--ghost" data-i18n="nav.rules">发行规则</a>
-      <div class="net-switch">
-        <button id="netBnb" class="btn btn--ghost btn--net" data-chain="56">BNB</button>
-        <button id="netXlayer" class="btn btn--ghost btn--net" data-chain="196">X Layer</button>
-      </div>
-      <span id="subBadge" class="badge" hidden data-i18n="nav.subscribed">订阅中 ✓</span>
-      <button id="subscribeBtn" class="btn btn--ghost" hidden data-i18n="nav.subscribe">订阅</button>
-      <span id="chainBadge" class="badge" data-i18n="nav.unconnected">未连接</span>
-    </div>
-    <button id="connectBtn" class="btn btn--primary nav__connect" data-i18n="nav.connect">连接钱包</button>
-    <button id="themeToggle" class="icon-btn" aria-label="切换深色模式">🌙</button>
-    <button id="langToggle" class="icon-btn lang-btn" aria-label="切换语言">中</button>
-    <button id="navToggle" class="nav__toggle" aria-label="菜单">
-      <span></span><span></span><span></span>
-    </button>
-  </header>
-
-  <!-- 移动端菜单 -->
-  <div id="navMenu" class="nav__menu">
-    <a href="./index.html" class="nav__menu-item" data-i18n="nav.menuLibrary">🎧 曲库</a>
-    <a href="./rules.html" class="nav__menu-item" data-i18n="nav.menuRules">📋 发行规则</a>
-    <div class="nav__menu-item nav__menu-net">
-      <span class="nav__menu-label" data-i18n="nav.net">网络</span>
-      <div class="net-switch">
-        <button id="netBnbM" class="btn btn--ghost btn--net" data-chain="56">BNB</button>
-        <button id="netXlayerM" class="btn btn--ghost btn--net" data-chain="196">X Layer</button>
-      </div>
-    </div>
-  </div>
-
-  <main class="container" style="max-width:760px">
-    <div class="rules-hero" style="text-align:left;padding:20px 0 10px">
-      <h1 style="font-size:26px" data-i18n="pub.title">发行唱片</h1>
-      <p style="font-size:14px" data-i18n="pub.desc">把你的音乐永久刻在链上。音频存入 TapeOut 链上容器，永久不可删；版税由智能合约即时结算。</p>
-    </div>
-
-    <section class="card">
-      <div class="form">
-        <div class="form__row">
-          <label data-i18n="pub.trackName">曲目名</label>
-          <input id="inTitle" type="text" placeholder="例如：夜空中最亮的星" data-i18n-ph="pub.trackNamePh" />
-        </div>
-        <div class="form__row">
-          <label data-i18n="pub.artist">艺人名</label>
-          <input id="inArtist" type="text" placeholder="你的名字或艺名" data-i18n-ph="pub.artistPh" />
-        </div>
-        <div class="form__row form__row--2">
-          <div>
-            <label data-i18n="pub.circuit">电路 #ID</label>
-            <input id="inTokenId" type="number" min="1" placeholder="如 4246" data-i18n-ph="pub.circuitPh" />
-          </div>
-          <div>
-            <label data-i18n="pub.cpu">处理器编号</label>
-            <input id="inCpu" type="number" min="0" value="0" placeholder="0" />
-            <span id="processorInfo" class="muted small"></span>
-          </div>
-        </div>
-        <div class="form__row">
-          <label data-i18n="pub.audio">音频文件</label>
-          <input id="inFile" type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/flac" />
-          <span id="fileInfo" class="muted small"></span>
-        </div>
-        <div class="form__row">
-          <label data-i18n="pub.cover">封面图（可选，建议 1:1，≤8.4MB）</label>
-          <input id="inCover" type="file" accept="image/*" />
-          <span id="coverInfo" class="muted small"></span>
-        </div>
-
-        <div class="form__row">
-          <label data-i18n="pub.royalty">版税分配（可选，留空则艺人 100%）</label>
-          <div id="royaltyList" class="royalty-list"></div>
-          <button id="addRoyaltyBtn" class="btn btn--ghost small-btn" data-i18n="pub.addRoyalty">+ 添加收益方</button>
-        </div>
-
-        <div class="form__row">
-          <label class="checkbox-row">
-            <input id="inFree" type="checkbox" />
-            <span data-i18n="pub.free">免费唱片（所有人免费听，不分钱、不计入订阅池子，仅用于推广）</span>
-          </label>
-        </div>
-
-        <div class="form__actions">
-          <button id="uploadBtn" class="btn btn--primary" disabled data-i18n="pub.submit">上传并注册</button>
-          <span id="uploadStatus" class="muted small"></span>
-        </div>
-      </div>
-
-      <div class="callout" style="margin-top:22px" data-i18n-html="pub.tip">
-        <strong>提示：</strong>上传需消耗当前链的 Gas（BNB Chain 用 BNB，X Layer 用 OKB）。发行前请确保电路已在对应链上开通容器（<a href="https://id.tapeout.link" target="_blank">id.tapeout.link</a>），并阅读 <a href="./rules.html">发行规则</a>。
-      </div>
-    </section>
-  </main>
-
-  <footer class="footer">
-    <p data-i18n="footer.text">音频存于 TapeOut 链上容器 · 版税合约即时结算 · 无服务器</p>
-  </footer>
-
-  <script src="./ethers.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js'"></script>
-  <script src="./lang.js"></script>
-  <script src="./app.js"></script>
+  <p>正在跳转到 <a href="./index.html#publish">发行面板</a>…</p>
 </body>
 </html>
