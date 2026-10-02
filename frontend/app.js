@@ -1,6 +1,6 @@
 /* ============================================================
- * 声刻 SonicMint v2 · 前端逻辑
- * 特性：X Layer / 订阅制 / 抗女巫 / 多方版税 / 无损分片
+ * 声刻 SonicMint v4 · 前端逻辑
+ * 特性：X Layer / 买断制 / 加密上链 / 分类 / 多方版税 / 无损分片
  * ============================================================ */
 
 // ───────── 链配置（仅 X Layer）─────────
@@ -27,6 +27,15 @@ const GATEWAY   = "https://{id}-{cpu}.tapekit.org";
 
 // 唯一允许发行的处理器编号（须与合约 allowedProcessor 一致）
 const PROCESSOR_NO = 260;
+// 音频分类：索引即合约里的 genre（0..MAX_GENRE），文案见 lang.js 的 genre.N
+const GENRES = ["pop", "rock", "electronic", "hiphop", "folk", "jazz", "classical", "gufeng", "instrumental", "podcast"];
+// 平台密钥管家（keeper）：封装/解封曲目内容密钥 K。部署后由 scripts/keeper-key.js 生成并回填
+const KEEPER = {
+  address: "0x0000000000000000000000000000000000000000",
+  publicKey: "0x0000000000000000000000000000000000000000000000000000000000000000", // keeper 的 X25519 公钥
+};
+// 购买后通知 keeper 封装 vault；须替换为实际 Worker 地址（wrangler deploy 输出，形如 https://sonicmint-keeper.<账号子域>.workers.dev/sync）
+const KEEPER_SYNC = "https://sonicmint-keeper.workers.dev/sync";
 // 电路 NFT（处理器合约）只读接口
 const CIRCUIT_ABI = [
   "function ownerOf(uint256) view returns (address)",
@@ -47,19 +56,14 @@ const PROCESSOR_FACTORY_ABI = [
   "function cpuAt(uint256 number) view returns (address)",
 ];
 const SONICMINT_ABI = [
-  "function registerTrack(address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, string title, string artistName, uint256 price, bool free, tuple(address addr, uint256 bps)[] royalties) returns (uint256)",
+  "function registerTrack(address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, tuple(string title, string artistName, uint8 genre, uint256 price, bool free, bool encrypted, bytes32 artistPubKey) meta, bytes wrappedCEK, tuple(address addr, uint256 bps)[] royalties) returns (uint256)",
   "function play(uint256 trackId)",
-  "function buy(uint256 trackId) payable",
-  "function subscribe(uint256 months) payable",
-  "function settleTrack(uint256 trackId)",
+  "function buy(uint256 trackId, bytes32 buyerPubKey) payable",
   "function trackCount() view returns (uint256)",
-  "function subscriptionPool() view returns (uint256)",
-  "function monthlyFee() view returns (uint256)",
-  "function totalPendingPlays() view returns (uint256)",
-  "function subscriptionExpiry(address) view returns (uint256)",
-  "function isSubscriber(address) view returns (bool)",
+  "function vaultOf(address user) view returns (bytes)",
+  "function userPubKey(address user) view returns (bytes32)",
   "function getPurchased(address user, uint256 offset, uint256 limit) view returns (bool[])",
-  "function getTracks(uint256 offset, uint256 limit) view returns (tuple(address artist, address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, string title, string artistName, uint256 playCount, uint256 totalEarned, uint256 pendingPlays, uint256 createdAt, uint256 price, bool free, bool exists)[])",
+  "function getTracks(uint256 offset, uint256 limit) view returns (tuple(address artist, address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, string title, string artistName, uint8 genre, uint256 playCount, uint256 totalEarned, uint256 createdAt, uint256 price, bool free, bool encrypted, bytes32 artistPubKey, bool exists)[])",
 ];
 
 // ───────── 状态 ─────────
@@ -69,13 +73,23 @@ let tracksCache = [];
 let currentTrackIdx = null;
 let searchQuery = "";
 let royaltyRecipients = []; // [{addr, bps}]
-let isSubscriberNow = false;   // 当前用户订阅是否有效
 let purchasedCache = [];       // bool[]，与 tracksCache 同索引
+let myKeyPair = null;          // 当前钱包派生的 X25519 密钥对（仅存内存，不落地）
+let vaultKeys = null;          // {trackId: K 的 hex}，来自链上 vault
 
 const $ = (id) => document.getElementById(id);
 const shortAddr = (a) => a.slice(0, 6) + "…" + a.slice(-4);
 const escapeHtml = (s) => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
 const sym = () => currentNetwork.symbol;
+
+// 拼接字节数组（分片下载后合并）
+function concatBytes(chunks) {
+  const len = chunks.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
 
 // 资源 URL：完整地址原样返回，链上曲目走网关
 function fileUrl(t, path) {
@@ -145,9 +159,10 @@ async function connectWallet() {
 
     // 更新网络相关显示
     updateNetworkLabels();
+    // 换账户/换链后旧密钥失效
+    myKeyPair = null; vaultKeys = null;
     // 若发行页已渲染电路下拉，连接后重新加载
     if ($("inCircuit")) loadCircuits();
-    await refreshSubscription();
     if ($("refreshBtn")) loadTracks();
     else loadCreatorPanel(); // 发行页：只刷新创作者面板
   } catch (e) {
@@ -194,96 +209,58 @@ function updateNetworkLabels() {
   });
 }
 
-async function refreshSubscription() {
-  if (!musicContract) return;
-  const subBtn = $("subscribeBtn"), subBadge = $("subBadge"), poolInfo = $("poolInfo");
-  if (!subBtn || !subBadge) return; // 发行页/规则页无此区域
-  if (!account) { // 未连接：隐藏订阅态，只显示池子数据
-    subBtn.hidden = true;
-    subBadge.hidden = true;
-    updateSubCard();
-    return;
+// ───────── 加密：钱包密钥对 / 内容密钥 / vault ─────────
+function cryptoLib() {
+  if (!window.TapeCrypto) throw new Error("加密模块未加载（crypto.js）");
+  return window.TapeCrypto;
+}
+
+// 派生（并缓存）当前钱包的 X25519 密钥对；需一次钱包签名，私钥仅存内存
+async function ensureKeyPair() {
+  if (myKeyPair) return myKeyPair;
+  if (!signer || !account) throw new Error("请先连接钱包");
+  myKeyPair = await cryptoLib().deriveWalletKeyPair({
+    signMessage: (text) => signer.signMessage(text),
+    holder: account,
+    hub: currentNetwork.music,
+    chainId: currentChainId,
+  });
+  return myKeyPair;
+}
+
+// 读取并解开自己的 vault → {trackId: K 的 hex}
+async function loadVaultKeys(refresh) {
+  if (vaultKeys && !refresh) return vaultKeys;
+  const lib = cryptoLib();
+  const payload = await musicContract.vaultOf(account);
+  if (!payload || payload === "0x") { vaultKeys = {}; return vaultKeys; }
+  const kp = await ensureKeyPair();
+  vaultKeys = lib.openVault(lib.hexToBytes(payload), kp.secretKey, account, {
+    hub: currentNetwork.music,
+    chainId: currentChainId,
+  });
+  return vaultKeys;
+}
+
+// 取某曲目的内容密钥；keeper 尚未写入时轮询等待（最多 ~12s）
+async function vaultKeyFor(idx) {
+  for (let i = 0; i < 7; i++) {
+    const keys = await loadVaultKeys(true);
+    if (keys[idx]) return keys[idx];
+    if (i < 6) await new Promise((r) => setTimeout(r, 2000));
   }
-  try {
-    const subscribed = await musicContract.isSubscriber(account);
-    const monthlyFee = await musicContract.monthlyFee();
-    subBtn.hidden = subscribed;
-    subBadge.hidden = !subscribed;
-    if (!subscribed) subBtn.textContent = `订阅 (${ethers.formatEther(monthlyFee)} ${sym()}/月)`;
-    if (poolInfo) {
-      const pool = await musicContract.subscriptionPool();
-      const pending = await musicContract.totalPendingPlays();
-      poolInfo.textContent = `池子 ${ethers.formatEther(pool)} ${sym()} · ${pending} 次待结算`;
-    }
-    updateSubCard();
-  } catch (e) { console.warn(e); }
+  return null;
 }
 
-// ───────── 订阅（可选 1/3/12 个月）─────────
-const SUB_MONTHS = [1, 3, 12];
-let subFee = 0n;
-
-// 动态注入订阅弹层，三页共用
-function ensureSubModal() {
-  if ($("subModal")) return;
-  const el = document.createElement("div");
-  el.id = "subModal";
-  el.className = "modal";
-  el.hidden = true;
-  el.innerHTML = `
-    <div class="modal__box">
-      <h3>${T("sub.title")}</h3>
-      <p class="muted small">${T("sub.desc")}</p>
-      <div class="sub-opts">
-        ${SUB_MONTHS.map((m) => `
-          <button class="sub-opt" data-months="${m}">
-            <span class="sub-opt__m">${m}</span>
-            <span class="sub-opt__unit">${T("sub.unit")}</span>
-            <span class="sub-opt__price" data-months="${m}"></span>
-          </button>`).join("")}
-      </div>
-      <button class="btn btn--ghost" id="subCancel">${T("sub.cancel")}</button>
-    </div>`;
-  document.body.appendChild(el);
-  el.addEventListener("click", (e) => { if (e.target === el) closeSubModal(); });
-  $("subCancel").addEventListener("click", closeSubModal);
-  el.querySelectorAll(".sub-opt").forEach((b) =>
-    b.addEventListener("click", () => doSubscribe(Number(b.dataset.months)))
-  );
-}
-
-function closeSubModal() { const m = $("subModal"); if (m) m.hidden = true; }
-
-async function openSubscribe() {
-  if (!musicContract) { toast("请先连接钱包", "err"); return; }
-  ensureSubModal();
+// 通知 keeper 立即为该用户封装 vault（购买后调用，失败不阻塞）
+async function syncVault() {
   try {
-    subFee = await musicContract.monthlyFee();
-    $("subModal").querySelectorAll(".sub-opt__price").forEach((s) => {
-      s.textContent = `${ethers.formatEther(subFee * BigInt(s.dataset.months))} ${sym()}`;
+    await fetch(KEEPER_SYNC, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ user: account, chainId: currentChainId }),
     });
-    $("subModal").hidden = false;
-  } catch (e) {
-    toast("读取月费失败：" + (e.reason || e.message), "err");
-  }
-}
-
-async function doSubscribe(months) {
-  closeSubModal();
-  const subBtn = $("subscribeBtn");
-  try {
-    if (subBtn) { subBtn.disabled = true; subBtn.textContent = "支付中…"; }
-    const tx = await musicContract.subscribe(months, { value: subFee * BigInt(months) });
-    await tx.wait();
-    toast(`订阅成功：${months} 个月`, "ok");
-  } catch (e) {
-    console.error(e);
-    toast("订阅失败：" + (e.reason || e.message), "err");
-  } finally {
-    if (subBtn) subBtn.disabled = false;
-    refreshSubscription();
-    loadTracks();
-  }
+  } catch (e) { console.warn("keeper sync failed", e); }
 }
 
 // ───────── 版税分配 UI ─────────
@@ -315,6 +292,7 @@ function renderRoyaltyList() {
 // 成功后清空表单，恢复按钮
 function resetUploadForm() {
   $("inTitle").value = ""; $("inArtist").value = ""; $("inFile").value = ""; $("inCover").value = "";
+  if ($("inGenre")) $("inGenre").value = "0";
   if ($("inPrice")) $("inPrice").value = "";
   $("fileInfo").textContent = ""; $("coverInfo").textContent = "";
   royaltyRecipients = []; renderRoyaltyList();
@@ -326,12 +304,14 @@ async function uploadAudio() {
   const artist = $("inArtist").value.trim();
   const tokenId = parseInt($("inCircuit").value);
   const cpu = PROCESSOR_NO;
+  const genre = Number($("inGenre") ? $("inGenre").value : 0);
   const file = $("inFile").files[0];
   const coverFile = $("inCover").files[0];
   const status = $("uploadStatus");
 
   if (!tokenId) { toast(T("pub.circuitPick"), "err"); return; }
   if (!title || !artist || !file) { toast("请填写完整信息并选择音频文件", "err"); return; }
+  if (!Number.isInteger(genre) || genre < 0 || genre >= GENRES.length) { toast(T("pub.genrePick"), "err"); return; }
 
   // 版税校验
   const totalBps = royaltyRecipients.reduce((s, r) => s + r.bps, 0);
@@ -342,6 +322,7 @@ async function uploadAudio() {
   const priceStr = $("inPrice") ? $("inPrice").value.trim() : "";
   if (!isFree && !(Number(priceStr) > 0)) { toast("请填写买断价（大于 0）", "err"); return; }
   const priceWei = isFree ? 0n : ethers.parseEther(priceStr);
+  const encrypted = !isFree; // 付费曲目一律加密上链
 
   $("uploadBtn").disabled = true;
   status.style.color = "";
@@ -372,8 +353,25 @@ async function uploadAudio() {
       }
     }
 
+    // ─── 加密音频（付费曲目）：随机 K 加密，K 封给 keeper 后上链 ───
+    let buf = new Uint8Array(await file.arrayBuffer());
+    let wrappedCEK = "0x";
+    let artistPubKey = ethers.ZeroHash;
+    if (encrypted) {
+      status.textContent = "生成内容密钥…";
+      const lib = cryptoLib();
+      const kp = await ensureKeyPair();
+      const cfg = { hub: currentNetwork.music, chainId: currentChainId };
+      const key = lib.randomKey();
+      buf = lib.encryptBytes(key, buf);
+      artistPubKey = lib.pubKeyHex(kp.publicKey);
+      wrappedCEK = lib.bytesToHex(lib.wrapKeyFor(key, {
+        address: KEEPER.address,
+        publicKey: lib.pubKeyBytes(KEEPER.publicKey),
+      }, cfg));
+    }
+
     // ─── 上传音频（分片）───
-    const buf = new Uint8Array(await file.arrayBuffer());
     const partSize = FILE_MAX;
     const partCount = Math.ceil(buf.length / partSize);
     const ext = file.name.split(".").pop() || "mp3";
@@ -401,12 +399,13 @@ async function uploadAudio() {
     status.textContent = "注册曲目…";
     const royalties = royaltyRecipients.map((r) => ({ addr: r.addr, bps: r.bps }));
     const audioPath = partCount > 1 ? basePath : `${basePath}.${ext}`;
-    const tx = await musicContract.registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, title, artist, priceWei, isFree, royalties);
+    const meta = { title, artistName: artist, genre, price: priceWei, free: isFree, encrypted, artistPubKey };
+    const tx = await musicContract.registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, royalties);
     const rc = await tx.wait();
     const evt = rc.logs.find((l) => l.fragment && l.fragment.name === "TrackRegistered");
     const trackId = evt ? evt.args[0].toString() : "?";
 
-    status.textContent = `✓ 发行成功！曲目 #${trackId}${partCount > 1 ? `（${partCount} 分片）` : ""}${coverPath ? " · 含封面" : ""}`;
+    status.textContent = `✓ 发行成功！曲目 #${trackId}${partCount > 1 ? `（${partCount} 分片）` : ""}${encrypted ? " · 已加密" : ""}${coverPath ? " · 含封面" : ""}`;
     status.style.color = "var(--accent)";
 
     resetUploadForm();
@@ -425,8 +424,7 @@ async function fetchTracks() {
   if (!musicContract) return;
   const count = Number(await musicContract.trackCount());
   tracksCache = count === 0 ? [] : await musicContract.getTracks(0, count);
-  // 当前用户的播放权限：订阅状态 + 各曲目买断状态（与 tracksCache 同索引）
-  isSubscriberNow = account ? await musicContract.isSubscriber(account).catch(() => false) : false;
+  // 当前用户的买断状态（与 tracksCache 同索引）
   purchasedCache = account ? await musicContract.getPurchased(account, 0, count).catch(() => []) : [];
 }
 
@@ -468,10 +466,10 @@ function visibleTracks() {
     .filter(({ t }) => !q || t.title.toLowerCase().includes(q) || t.artistName.toLowerCase().includes(q));
 }
 
-// 播放权限：免费 / 已买断 / 订阅有效期内
+// 播放权限：免费 / 已买断
 function canPlay(idx) {
   const t = tracksCache[idx];
-  return !!t && (t.free || !!purchasedCache[idx] || isSubscriberNow);
+  return !!t && (t.free || !!purchasedCache[idx]);
 }
 
 // 可播放曲目的索引（「我的曲库」列表数据源）
@@ -484,12 +482,13 @@ function trackRowHtml(i) {
   const t = tracksCache[i];
   const coverUrl = fileUrl(t, t.coverPath);
   const locked = !canPlay(i);
-  // 状态标签：免费 | 已买断
+  // 状态标签：免费 | 已买断 | 分类
   const stateTag = t.free
     ? `<span class="tag tag--free">${T("lib.free")}</span>`
     : purchasedCache[i]
       ? `<span class="tag tag--own">${T("lib.owned")}</span>`
       : "";
+  const genreTag = `<span class="tag">${T("genre." + Number(t.genre))}</span>`;
   // 买断价：付费且未买断时显示在信息行
   const priceInfo = locked ? `<span class="tag tag--price">${ethers.formatEther(t.price)} ${sym()}</span>` : "";
   return `
@@ -500,6 +499,7 @@ function trackRowHtml(i) {
         <div class="track__meta">
           <span>${escapeHtml(t.artistName)}</span>
           <span class="track__plays">▶ ${Number(t.playCount)} 次</span>
+          ${genreTag}
           ${priceInfo}
         </div>
       </div>
@@ -551,11 +551,11 @@ function switchTab() {
   if (load) load();
 }
 
-// ───────── 个人面板：我的订阅 + 我购买的音乐 ─────────
+// ───────── 个人面板：我购买的音乐 ─────────
 async function loadProfile() {
   const list = $("purchasedList");
   if (!list) return;
-  if (!musicContract) { list.innerHTML = `<p class="muted">${T("profile.connectTip")}</p>`; updateSubCard(); return; }
+  if (!musicContract) { list.innerHTML = `<p class="muted">${T("profile.connectTip")}</p>`; return; }
   if (tracksCache.length === 0) { try { await fetchTracks(); } catch (e) { console.error(e); } }
   // 只列买断过的（免费曲目不算购买）
   const bought = tracksCache.map((_, i) => i).filter((i) => purchasedCache[i]);
@@ -563,19 +563,6 @@ async function loadProfile() {
     ? bought.map((i) => trackRowHtml(i)).join("")
     : `<p class="muted">${T("profile.noPurchased")}</p>`;
   if (bought.length) bindTrackRows(list);
-  updateSubCard();
-}
-
-// 订阅卡：状态文字 + 月费
-async function updateSubCard() {
-  const state = $("subState"), btn = $("subActionBtn");
-  if (!state || !btn) return;
-  if (!musicContract || !account) { state.textContent = T("profile.notConnected"); btn.hidden = true; return; }
-  let fee = "";
-  try { fee = ` · ${ethers.formatEther(await musicContract.monthlyFee())} ${sym()}/月`; } catch (e) {}
-  state.textContent = (isSubscriberNow ? T("profile.subStateOn") : T("profile.subStateOff")) + fee;
-  btn.hidden = false;
-  btn.textContent = isSubscriberNow ? T("profile.renew") : T("profile.subscribe");
 }
 
 // ───────── 迷你播放条 ─────────
@@ -650,7 +637,25 @@ function renderQueue() {
 function openQueue() { const q = $("queue"); if (!q) return; renderQueue(); q.hidden = false; }
 function closeQueue() { const q = $("queue"); if (q) q.hidden = true; }
 
-// ───────── 播放（支持分片合并）─────────
+// ───────── 播放（加密曲目解密 / 分片合并）─────────
+// 下载完整音频字节（分片则合并）
+async function fetchAudioBytes(t) {
+  const partCount = Number(t.partCount);
+  if (partCount <= 1) {
+    const res = await fetch(fileUrl(t, t.audioPath));
+    if (!res.ok) throw new Error("音频加载失败");
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  const baseUrl = GATEWAY.replace("{id}", t.tokenId).replace("{cpu}", t.cpu);
+  const chunks = [];
+  for (let i = 0; i < partCount; i++) {
+    const res = await fetch(`${baseUrl}/${t.audioPath}.part${i}`);
+    if (!res.ok) throw new Error(`分片 ${i} 加载失败`);
+    chunks.push(new Uint8Array(await res.arrayBuffer()));
+  }
+  return concatBytes(chunks);
+}
+
 async function playTrack(idx) {
   const t = tracksCache[idx];
   if (!t) return;
@@ -666,23 +671,19 @@ async function playTrack(idx) {
   audio.onended = () => playNext(); // 自动连播下一曲
 
   try {
-    const partCount = Number(t.partCount);
-    if (partCount > 1) {
-      // 分片下载并合并
-      const baseUrl = GATEWAY.replace("{id}", t.tokenId).replace("{cpu}", t.cpu);
-      const blobs = [];
-      for (let i = 0; i < partCount; i++) {
-        const res = await fetch(`${baseUrl}/${t.audioPath}.part${i}`);
-        if (!res.ok) throw new Error(`分片 ${i} 加载失败`);
-        blobs.push(await res.blob());
+    if (t.encrypted || Number(t.partCount) > 1) {
+      let bytes = await fetchAudioBytes(t);
+      if (t.encrypted) {
+        // 取自己的内容密钥 K（keeper 未就绪时轮询等待）
+        const keyHex = await vaultKeyFor(idx);
+        if (!keyHex) throw new Error("密钥尚未就绪，请稍后重试");
+        bytes = cryptoLib().decryptBytes(cryptoLib().hexToBytes(keyHex, 32), bytes);
       }
-      audio.src = URL.createObjectURL(new Blob(blobs, { type: "audio/mpeg" }));
+      audio.src = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
     } else {
       audio.src = fileUrl(t, t.audioPath);
     }
     await audio.play();
-    // 记账：订阅畅听且非免费未买断时，静默上报一次播放
-    if (isSubscriberNow && !t.free && !purchasedCache[idx]) musicContract.play(idx).catch(() => {});
   } catch (e) {
     toast("无法播放：" + e.message, "err");
     currentTrackIdx = null;
@@ -699,9 +700,17 @@ async function doBuy(idx, btn) {
   const label = btn ? btn.textContent : "";
   try {
     if (btn) { btn.disabled = true; btn.textContent = "支付中…"; }
-    const tx = await musicContract.buy(idx, { value: t.price });
+    // 加密曲目须提交买家 X25519 公钥，keeper 据此封装 vault
+    let buyerPubKey = ethers.ZeroHash;
+    if (t.encrypted) {
+      const kp = await ensureKeyPair();
+      buyerPubKey = cryptoLib().pubKeyHex(kp.publicKey);
+    }
+    const tx = await musicContract.buy(idx, buyerPubKey, { value: t.price });
     await tx.wait();
     purchasedCache[idx] = true;
+    // 通知 keeper 封装 vault，并清空本地缓存以便重新读取
+    if (t.encrypted) { vaultKeys = null; syncVault(); }
     toast(`买断成功：${t.title}`, "ok");
   } catch (e) {
     console.error(e);
@@ -710,22 +719,6 @@ async function doBuy(idx, btn) {
     if (btn) { btn.disabled = false; btn.textContent = label; }
   }
   if (purchasedCache[idx]) { renderTracks(); playTrack(idx); } // 买断后立即播放
-}
-
-// ───────── 结算 ─────────
-async function settleTrack(idx) {
-  const t = tracksCache[idx];
-  if (!t || Number(t.pendingPlays) === 0) return;
-  try {
-    const tx = await musicContract.settleTrack(idx);
-    await tx.wait();
-    toast("结算完成", "ok");
-    loadTracks();
-    if ($("creatorPanel")) loadCreatorPanel();
-  } catch (e) {
-    console.error(e);
-    toast("结算失败：" + (e.reason || e.message), "err");
-  }
 }
 
 // ───────── 播放队列：上/下一曲（在可播放曲目内循环）─────────
@@ -772,23 +765,16 @@ function updateCreatorPanel() {
   $("creatorName").textContent = shortAddr(account);
   $("statTracks").textContent = mine.length;
   const earned = mine.reduce((s, t) => s + Number(ethers.formatEther(t.totalEarned)), 0);
-  const pending = mine.reduce((s, t) => s + Number(t.pendingPlays), 0);
   $("statEarned").textContent = `${earned.toFixed(4)} ${sym()}`;
-  $("statPending").textContent = pending;
   const listEl = $("creatorDetailList");
   listEl.innerHTML = mineIdx.map((i) => {
     const t = tracksCache[i];
-    const hasPending = Number(t.pendingPlays) > 0;
     return `
     <div class="creator__row">
       <span class="t">${escapeHtml(t.title)}</span>
-      <span class="m">▶ ${Number(t.playCount)} 次 · 💰 ${ethers.formatEther(t.totalEarned)} ${sym()}${hasPending ? ` · ⏳ ${t.pendingPlays} 待结算` : ""}</span>
-      ${hasPending ? `<button class="btn btn--ghost btn--sm" data-settle="${i}">结算</button>` : ""}
+      <span class="m">▶ ${Number(t.playCount)} 次 · 💰 ${ethers.formatEther(t.totalEarned)} ${sym()}</span>
     </div>`;
   }).join("");
-  listEl.querySelectorAll("[data-settle]").forEach((b) =>
-    b.addEventListener("click", () => settleTrack(Number(b.dataset.settle)))
-  );
 }
 
 // ───────── 电路下拉：枚举当前钱包在指定处理器下持有的电路 ─────────
@@ -862,8 +848,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // 通用：所有页面
   const connectBtn = $("connectBtn");
   if (connectBtn) connectBtn.addEventListener("click", connectWallet);
-  const subBtn = $("subscribeBtn");
-  if (subBtn) subBtn.addEventListener("click", openSubscribe);
 
   // 网络切换按钮
   const netXlayer = $("netXlayer");
@@ -893,10 +877,8 @@ window.addEventListener("DOMContentLoaded", () => {
     $("queueClose").addEventListener("click", closeQueue);
     $("queue").querySelector("[data-close]").addEventListener("click", closeQueue);
     // 曲库
-    $("refreshBtn").addEventListener("click", () => { loadTracks(); refreshSubscription(); });
+    $("refreshBtn").addEventListener("click", loadTracks);
     $("searchInput").addEventListener("input", (e) => { searchQuery = e.target.value; renderTracks(); });
-    // 个人面板：订阅
-    $("subActionBtn").addEventListener("click", openSubscribe);
 
     // 发行页 Hero：CTA 展开上传表单并滚动到位
     const heroCta = $("heroCta"), pubForm = $("publishForm");
@@ -941,11 +923,11 @@ window.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    // 首屏：拉曲库 → 订阅状态 → 按 hash 定位面板
+    // 首屏：拉曲库 → 按 hash 定位面板
     if ("scrollRestoration" in history) history.scrollRestoration = "manual"; // 禁用刷新后的滚动恢复，避免 Hero 被吸顶栏遮住
     window.addEventListener("hashchange", () => { switchTab(); window.scrollTo(0, 0); }); // 切面板回到顶部
     window.scrollTo(0, 0);
-    (async () => { await loadTracks(); refreshSubscription(); switchTab(); })();
+    (async () => { await loadTracks(); switchTab(); })();
   }
 
   if (window.ethereum) {

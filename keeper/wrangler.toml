@@ -1,0 +1,13 @@
+# SonicMint keeper Worker 部署配置
+# 打包：npm run build:keeper   部署：npm run deploy:keeper
+# Secret：npx wrangler secret put KEEPER_PRIVATE_KEY --config keeper/wrangler.toml
+name = "sonicmint-keeper"
+main = "dist/worker.js"
+compatibility_date = "2025-01-01"
+no_bundle = true
+
+[vars]
+CHAIN_ID = "196"
+RPC_URL = "https://rpc.xlayer.tech"
+# 合约地址：SonicMint 每次重部署后须同步更新（同时决定 keeper 公钥）
+CONTRACT = "0xDcFe709728E085cD59Bb10fd09AbA657BF68b087"

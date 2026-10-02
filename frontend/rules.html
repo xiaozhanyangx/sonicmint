@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>发行规则 · 声刻</title>
-  <meta name="description" content="声刻 SonicMint 发行规则：如何在 TapeOut 链上发行唱片、版税结算方式、订阅与免费播放机制。" />
+  <meta name="description" content="声刻 SonicMint 发行规则：如何在 TapeOut 链上发行唱片、付费曲目加密上链、版税即时结算与买断机制。" />
   <meta name="theme-color" content="#5b4be0" />
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235b4be0'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle'%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E" />
@@ -81,8 +81,13 @@
         </div>
         <div class="rule-card">
           <div class="rule-card__icon">🌐</div>
-          <h3 data-i18n="rule.external.title">外部播放结算</h3>
-          <p data-i18n-html="rule.external.desc">第三方播放器只需调用合约 <code>play(trackId)</code> 即可触发版税结算，适合嵌入式播放场景。</p>
+          <h3 data-i18n="rule.external.title">外部播放集成</h3>
+          <p data-i18n-html="rule.external.desc">第三方播放器可调用合约 <code>play(trackId)</code> 上报播放次数，便于统计与嵌入式场景集成。</p>
+        </div>
+        <div class="rule-card">
+          <div class="rule-card__icon">🔑</div>
+          <h3 data-i18n="rule.encrypt.title">加密上链保护</h3>
+          <p data-i18n="rule.encrypt.desc">付费曲目在上传前用随机内容密钥（CEK）加密，密钥由平台密钥管家封装后分发给购买者；链上只存密文，未购买者无法解密播放。</p>
         </div>
         <div class="rule-card">
           <div class="rule-card__icon">📦</div>
@@ -113,21 +118,21 @@
         <div class="rules-step__num">2</div>
         <div class="rules-step__body">
           <strong data-i18n="rules.step2.title">填写发行信息</strong>
-          <p data-i18n="rules.step2.desc">在首页填写曲目名、艺人名、电路 #ID、处理器编号，上传音频和封面图。可选择性添加多个版税收益方。</p>
+          <p data-i18n="rules.step2.desc">在首页填写曲目名、艺人名、分类、电路 #ID、处理器编号，上传音频和封面图。可选择性添加多个版税收益方。</p>
         </div>
       </div>
       <div class="rules-step">
         <div class="rules-step__num">3</div>
         <div class="rules-step__body">
           <strong data-i18n="rules.step3.title">上链存储</strong>
-          <p data-i18n="rules.step3.desc">点击"上传并注册"，音频和封面将逐块写入你的 TapeOut 容器，同时在合约中注册曲目信息。</p>
+          <p data-i18n="rules.step3.desc">点击"上传并注册"，音频和封面将逐块写入你的 TapeOut 容器，同时在合约中注册曲目信息。付费曲目会先加密再上传。</p>
         </div>
       </div>
       <div class="rules-step">
         <div class="rules-step__num">4</div>
         <div class="rules-step__body">
           <strong data-i18n="rules.step4.title">上架完成</strong>
-          <p data-i18n="rules.step4.desc">曲目出现在曲库中，任何人都可以播放。每次播放触发版税结算，收入即时到账。</p>
+          <p data-i18n="rules.step4.desc">曲目出现在曲库中，任何人可买断；付费曲目加密上链，仅购买者可解密播放。买断收入即时分流到账。</p>
         </div>
       </div>
     </section>
@@ -136,27 +141,18 @@
     <section class="card">
       <h2 data-i18n="rules.settle.title">播放与结算规则</h2>
 
-      <h3 class="subhead" data-i18n="rules.settle.modes">三种播放模式</h3>
-      <div class="rules-grid rules-grid--3">
+      <h3 class="subhead" data-i18n="rules.settle.modes">两种播放模式</h3>
+      <div class="rules-grid">
         <div class="rule-card rule-card--tight">
           <div class="rule-card__icon">🆓</div>
           <h3 data-i18n="settle.free.title">免费播放</h3>
-          <p data-i18n="settle.free.desc">艺人勾选"免费唱片"后，任何人无需付费、无需订阅即可播放。<strong>不分钱、不计入订阅池子</strong>，纯推广用途。</p>
+          <p data-i18n="settle.free.desc">艺人勾选"免费唱片"后，任何人无需付费即可播放。<strong>不加密、不分钱</strong>，纯推广用途。</p>
         </div>
         <div class="rule-card rule-card--tight">
           <div class="rule-card__icon">💸</div>
           <h3 data-i18n="settle.buy.title">买断播放</h3>
-          <p data-i18n="settle.buy.desc">非订阅用户可一次付清买断价，永久可听。收入即时按版税比例分流给各收益方，剩余归平台。</p>
+          <p data-i18n="settle.buy.desc">买家一次付清买断价，永久可听。收入先扣除 3% 平台抽成，其余即时分流给各收益方；付费曲目加密上链，仅购买者可解密。</p>
         </div>
-        <div class="rule-card rule-card--tight">
-          <div class="rule-card__icon">🎫</div>
-          <h3 data-i18n="settle.sub.title">订阅播放</h3>
-          <p data-i18n="settle.sub.desc">订阅用户（月费默认 0.01 OKB，可选 1/3/12 个月）可免费播放非免费曲目，播放次数计入池子，按占比结算给艺人。</p>
-        </div>
-      </div>
-
-      <div class="callout" data-i18n-html="rules.pool">
-        <strong>结算说明：</strong>播放本身不收费。仅当用户处于订阅期内、且曲目非免费且未买断时，播放次数才计入订阅池子，由 <code>settleTrack</code> 按占比结算给艺人。
       </div>
 
       <h3 class="subhead" data-i18n="rules.royalty.title2">版税分配</h3>
@@ -214,7 +210,7 @@
         <li data-i18n="rules.note1">上传需消耗 OKB Gas 费，文件越大 Gas 越高（建议单首歌控制在 8.4MB 以内）。</li>
         <li data-i18n="rules.note2">请确保你拥有上传音频的版权或已获得授权，平台不对内容版权负责。</li>
         <li data-i18n="rules.note3">版税分配比例一旦注册不可修改，请仔细核对后再提交。</li>
-        <li data-i18n-html="rules.note4">订阅池子的结算需手动触发 <code>settleTrack</code>，建议定期结算。</li>
+        <li data-i18n-html="rules.note4">付费曲目由平台密钥管家（keeper）托管分发内容密钥；请妥善保管钱包私钥与签名权，换钱包或更换域名前缀可能导致已购密钥无法再派生。</li>
         <li data-i18n="rules.note5">本平台处于早期阶段，合约代码已审计思路但未经过正式安全审计，建议小额测试。</li>
       </ul>
     </section>

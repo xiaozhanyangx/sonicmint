@@ -12,11 +12,6 @@
         "type": "uint256"
       },
       {
-        "internalType": "uint256",
-        "name": "_monthlyFee",
-        "type": "uint256"
-      },
-      {
         "internalType": "address",
         "name": "_factory",
         "type": "address"
@@ -40,43 +35,12 @@
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint256",
-        "name": "newFee",
-        "type": "uint256"
-      }
-    ],
-    "name": "MonthlyFeeUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
         "internalType": "address",
-        "name": "user",
+        "name": "newKeeper",
         "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "expiry",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "months",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
       }
     ],
-    "name": "Subscribed",
+    "name": "KeeperUpdated",
     "type": "event"
   },
   {
@@ -124,6 +88,12 @@
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "buyerPubKey",
+        "type": "bytes32"
       }
     ],
     "name": "TrackPurchased",
@@ -158,9 +128,15 @@
       },
       {
         "indexed": false,
-        "internalType": "uint256",
-        "name": "partCount",
-        "type": "uint256"
+        "internalType": "uint8",
+        "name": "genre",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "encrypted",
+        "type": "bool"
       }
     ],
     "name": "TrackRegistered",
@@ -171,47 +147,28 @@
     "inputs": [
       {
         "indexed": true,
-        "internalType": "uint256",
-        "name": "trackId",
-        "type": "uint256"
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
       },
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "plays",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
+        "name": "size",
         "type": "uint256"
       }
     ],
-    "name": "TrackSettled",
+    "name": "VaultUpdated",
     "type": "event"
   },
   {
     "inputs": [],
-    "name": "MAX_MONTHS",
+    "name": "MAX_GENRE",
     "outputs": [
       {
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "MONTH",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
+        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -236,6 +193,11 @@
         "internalType": "uint256",
         "name": "trackId",
         "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "buyerPubKey",
+        "type": "bytes32"
       }
     ],
     "name": "buy",
@@ -343,6 +305,11 @@
             "type": "string"
           },
           {
+            "internalType": "uint8",
+            "name": "genre",
+            "type": "uint8"
+          },
+          {
             "internalType": "uint256",
             "name": "playCount",
             "type": "uint256"
@@ -350,11 +317,6 @@
           {
             "internalType": "uint256",
             "name": "totalEarned",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "pendingPlays",
             "type": "uint256"
           },
           {
@@ -371,6 +333,16 @@
             "internalType": "bool",
             "name": "free",
             "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "encrypted",
+            "type": "bool"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "artistPubKey",
+            "type": "bytes32"
           },
           {
             "internalType": "bool",
@@ -480,6 +452,11 @@
             "type": "string"
           },
           {
+            "internalType": "uint8",
+            "name": "genre",
+            "type": "uint8"
+          },
+          {
             "internalType": "uint256",
             "name": "playCount",
             "type": "uint256"
@@ -487,11 +464,6 @@
           {
             "internalType": "uint256",
             "name": "totalEarned",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "pendingPlays",
             "type": "uint256"
           },
           {
@@ -511,6 +483,16 @@
           },
           {
             "internalType": "bool",
+            "name": "encrypted",
+            "type": "bool"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "artistPubKey",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bool",
             "name": "exists",
             "type": "bool"
           }
@@ -524,32 +506,13 @@
     "type": "function"
   },
   {
-    "inputs": [
+    "inputs": [],
+    "name": "keeper",
+    "outputs": [
       {
         "internalType": "address",
-        "name": "user",
+        "name": "",
         "type": "address"
-      }
-    ],
-    "name": "isSubscriber",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "monthlyFee",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -664,24 +627,51 @@
         "type": "string"
       },
       {
-        "internalType": "string",
-        "name": "title",
-        "type": "string"
+        "components": [
+          {
+            "internalType": "string",
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "artistName",
+            "type": "string"
+          },
+          {
+            "internalType": "uint8",
+            "name": "genre",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "free",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "encrypted",
+            "type": "bool"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "artistPubKey",
+            "type": "bytes32"
+          }
+        ],
+        "internalType": "struct SonicMint.TrackMeta",
+        "name": "meta",
+        "type": "tuple"
       },
       {
-        "internalType": "string",
-        "name": "artistName",
-        "type": "string"
-      },
-      {
-        "internalType": "uint256",
-        "name": "price",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "free",
-        "type": "bool"
+        "internalType": "bytes",
+        "name": "wrappedCEK",
+        "type": "bytes"
       },
       {
         "components": [
@@ -715,6 +705,25 @@
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "sealedCEK",
+    "outputs": [
+      {
+        "internalType": "bytes",
+        "name": "",
+        "type": "bytes"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "_processor",
         "type": "address"
@@ -728,12 +737,12 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "_fee",
-        "type": "uint256"
+        "internalType": "address",
+        "name": "_keeper",
+        "type": "address"
       }
     ],
-    "name": "setMonthlyFee",
+    "name": "setKeeper",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -767,72 +776,19 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "trackId",
-        "type": "uint256"
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes",
+        "name": "payload",
+        "type": "bytes"
       }
     ],
-    "name": "settleTrack",
+    "name": "setVault",
     "outputs": [],
     "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "months",
-        "type": "uint256"
-      }
-    ],
-    "name": "subscribe",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "name": "subscriptionExpiry",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "subscriptionPool",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "totalPendingPlays",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -933,6 +889,11 @@
         "type": "string"
       },
       {
+        "internalType": "uint8",
+        "name": "genre",
+        "type": "uint8"
+      },
+      {
         "internalType": "uint256",
         "name": "playCount",
         "type": "uint256"
@@ -940,11 +901,6 @@
       {
         "internalType": "uint256",
         "name": "totalEarned",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "pendingPlays",
         "type": "uint256"
       },
       {
@@ -964,8 +920,56 @@
       },
       {
         "internalType": "bool",
+        "name": "encrypted",
+        "type": "bool"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "artistPubKey",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bool",
         "name": "exists",
         "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "userPubKey",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      }
+    ],
+    "name": "vaultOf",
+    "outputs": [
+      {
+        "internalType": "bytes",
+        "name": "",
+        "type": "bytes"
       }
     ],
     "stateMutability": "view",

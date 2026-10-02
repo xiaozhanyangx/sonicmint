@@ -2,18 +2,23 @@
 pragma solidity ^0.8.20;
 
 /**
- * @title SonicMint v3
- * @notice 链上音乐发行与版税结算合约
- *         v3 特性：
+ * @title SonicMint v4
+ * @notice 链上音乐发行、版税结算与加密密钥分发合约
+ *         v4 特性：
  *           1. 免费唱片：任何人免费听
- *           2. 订阅制：按月起订（1–12 个月），订阅期内免费听非免费曲目，按播放占比结算给艺人
- *           3. 买断制：单曲一次付费，永久可听，收入即时分流
- *           4. 多方版税：每首歌可配置多个收益方（艺人/制作人/作词/作曲…）
- *           5. 无损分片：单文件超 8.4MB 可分片上传，前端合并播放
- *           6. 平台抽成：每笔收入先按 platformBps 扣除，余下按版税比例分给收益方
- *           7. 处理器白名单：仅指定处理器的电路可发行唱片，并校验容器归属与开启状态
+ *           2. 买断制：单曲一次付费，永久可听，收入即时分流（v3 的订阅制已移除）
+ *           3. 多方版税：每首歌可配置多个收益方（艺人/制作人/作词/作曲…）
+ *           4. 分类标签：每首歌带一个 genre 分类
+ *           5. 加密上链：音频用内容密钥 K 加密后存入容器，K 经 keeper 逐用户封装成 vault
+ *           6. 无损分片：单文件超 8.4MB 可分片上传，前端合并播放
+ *           7. 平台抽成：每笔收入先按 platformBps 扣除，余下按版税比例分给收益方
+ *           8. 处理器白名单：仅指定处理器的电路可发行唱片，并校验容器归属与开启状态
  *
- * 播放本身不收钱，付费只发生在 buy()（买断）与 subscribe()（订阅）
+ * 加密流程（TAP-10 载荷，X25519 + XChaCha20-Poly1305）：
+ *   - 艺人上传前生成随机 K，用 K 加密音频；K 封给 keeper 公钥后上链，存于 sealedCEK[trackId]
+ *   - 买家 buy() 时提交自己的 X25519 公钥，keeper 解出 K 后为该买家封一份 vault
+ *   - 买家播放时用自己钱包派生的私钥解开 vault，得到已购曲目的 K
+ *   - 所有载荷统一约定：chainId = 部署链、hub = 本合约、from = 本合约地址、to = 收件人地址
  */
 
 /// TapeOut 处理器工厂：按编号查处理器地址
@@ -35,6 +40,17 @@ contract SonicMint {
         uint256 bps;     // 分成比例（基点，10000 = 100%）
     }
 
+    /// @notice 发行时的元信息，避免 registerTrack 参数过多
+    struct TrackMeta {
+        string  title;
+        string  artistName;
+        uint8   genre;        // 分类编号，0..MAX_GENRE
+        uint256 price;        // 买断价（wei）；free = true 时忽略
+        bool    free;         // 免费唱片
+        bool    encrypted;    // 是否加密上链（加密曲目必须付费）
+        bytes32 artistPubKey; // 艺人的 X25519 公钥，供 keeper 封装时参考
+    }
+
     struct Track {
         address artist;          // 主艺人（注册者）
         address container;       // TapeOut 容器地址
@@ -45,12 +61,14 @@ contract SonicMint {
         string  coverPath;       // 封面图路径
         string  title;
         string  artistName;
+        uint8   genre;
         uint256 playCount;       // 总播放次数
-        uint256 totalEarned;     // 累计版税收入（wei）
-        uint256 pendingPlays;    // 待结算的订阅播放次数
+        uint256 totalEarned;     // 累计收入（wei）
         uint256 createdAt;
-        uint256 price;           // 买断价（wei）；free = true 时忽略
-        bool    free;            // 免费唱片：任何人免费听，不分钱、不计入池子
+        uint256 price;           // 买断价（wei）；free = true 时为 0
+        bool    free;
+        bool    encrypted;
+        bytes32 artistPubKey;
         bool    exists;
     }
 
@@ -58,10 +76,12 @@ contract SonicMint {
 
     mapping(uint256 => Track) public tracks;
     mapping(uint256 => RoyaltyRecipient[]) public trackRoyalties;
+    mapping(uint256 => bytes) public sealedCEK; // 曲目内容密钥 K，封给 keeper 公钥的 TAP-10 载荷
     uint256 public trackCount;
 
     address public platform;
     uint256 public platformBps;       // 平台抽成比例（基点，1000 = 10%），每笔收入先行扣除
+    address public keeper;            // 密钥管家：封装 vault 的唯一写入方
 
     // TapeOut 协议地址（用于发行时校验处理器与容器）
     address public immutable factory; // 处理器工厂
@@ -71,32 +91,27 @@ contract SonicMint {
     // 买断：用户 => 曲目 => 已买断
     mapping(address => mapping(uint256 => bool)) public purchased;
 
-    // 订阅制
-    mapping(address => uint256) public subscriptionExpiry;
-    uint256 public monthlyFee;        // 订阅月费（wei，30 天）
-    uint256 public subscriptionPool;  // 待分配的订阅池子
-    uint256 public totalPendingPlays; // 所有曲目待结算播放总数
+    // 加密：用户 => 派生的 X25519 公钥；用户 => 已购曲目密钥的封装载荷
+    mapping(address => bytes32) public userPubKey;
+    mapping(address => bytes) private _vault;
 
-    uint256 public constant MONTH = 30 days;
-    uint256 public constant MAX_MONTHS = 12; // 单次最多预付 12 个月
+    uint8 public constant MAX_GENRE = 9; // 分类编号上限（0..9 共 10 类）
 
     bool private _locked;
 
     // ───────────────────────── 事件 ─────────────────────────
 
-    event TrackRegistered(uint256 indexed trackId, address indexed artist, address container, string title, uint256 partCount);
+    event TrackRegistered(uint256 indexed trackId, address indexed artist, address container, string title, uint8 genre, bool encrypted);
     event TrackPlayed(uint256 indexed trackId, address indexed player, bool unlocked);
-    event TrackPurchased(uint256 indexed trackId, address indexed buyer, uint256 amount);
-    event Subscribed(address indexed user, uint256 expiry, uint256 months, uint256 amount);
-    event TrackSettled(uint256 indexed trackId, uint256 plays, uint256 amount);
-    event MonthlyFeeUpdated(uint256 newFee);
+    event TrackPurchased(uint256 indexed trackId, address indexed buyer, uint256 amount, bytes32 buyerPubKey);
+    event VaultUpdated(address indexed user, uint256 size);
+    event KeeperUpdated(address newKeeper);
 
     // ───────────────────────── 构造 ─────────────────────────
 
     constructor(
         address _platform,
         uint256 _platformBps,
-        uint256 _monthlyFee,
         address _factory,
         address _opener,
         address _processor
@@ -107,7 +122,6 @@ contract SonicMint {
         require(_opener != address(0), "opener = zero");
         platform = _platform;
         platformBps = _platformBps;
-        monthlyFee = _monthlyFee;
         factory = _factory;
         opener = _opener;
         allowedProcessor = _processor;
@@ -156,7 +170,8 @@ contract SonicMint {
     /**
      * @param container 容器地址，须等于 opener.accountOf(cpuAt(cpu), tokenId)，且该容器已开启
      * @param cpu       处理器编号，须指向 allowedProcessor（未设白名单时不限）
-     * @param price     买断价（wei）；free = true 时忽略，否则必须 > 0
+     * @param meta      元信息；meta.encrypted 为真时须同时给出 artistPubKey 与 wrappedCEK
+     * @param wrappedCEK 内容密钥封给 keeper 的载荷；未加密时留空
      * @param royalties 收益方列表，bps 相对「扣除平台抽成后」的金额计算，总和须 ≤ 10000；若为空则艺人拿 100%
      * @param partCount 分片数，0 或 1 表示单文件
      */
@@ -167,17 +182,22 @@ contract SonicMint {
         string calldata audioPath,
         uint256 partCount,
         string calldata coverPath,
-        string calldata title,
-        string calldata artistName,
-        uint256 price,
-        bool free,
+        TrackMeta calldata meta,
+        bytes calldata wrappedCEK,
         RoyaltyRecipient[] calldata royalties
     ) external returns (uint256 trackId) {
         require(container != address(0), "container = zero");
         require(tokenId != 0, "tokenId = 0");
         require(bytes(audioPath).length > 0, "empty path");
-        require(bytes(title).length > 0, "empty title");
-        require(free || price > 0, "price = 0");
+        require(bytes(meta.title).length > 0, "empty title");
+        require(meta.genre <= MAX_GENRE, "bad genre");
+        require(meta.free || meta.price > 0, "price = 0");
+        // 免费曲目无法触发买断，也就无法生成 vault，因此不允许加密
+        require(!(meta.free && meta.encrypted), "free cannot be encrypted");
+        if (meta.encrypted) {
+            require(meta.artistPubKey != bytes32(0), "artist pubkey = 0");
+            require(wrappedCEK.length > 0, "empty wrapped CEK");
+        }
 
         // 处理器与容器校验：处理器须为指定地址，容器须与 (cpu, tokenId) 匹配且已开启
         // processor 由合约自行从工厂查得，不接受调用方传入，避免绕过白名单
@@ -204,16 +224,20 @@ contract SonicMint {
             audioPath: audioPath,
             partCount: partCount,
             coverPath: coverPath,
-            title: title,
-            artistName: artistName,
+            title: meta.title,
+            artistName: meta.artistName,
+            genre: meta.genre,
             playCount: 0,
             totalEarned: 0,
-            pendingPlays: 0,
             createdAt: block.timestamp,
-            price: free ? 0 : price,
-            free: free,
+            price: meta.free ? 0 : meta.price,
+            free: meta.free,
+            encrypted: meta.encrypted,
+            artistPubKey: meta.artistPubKey,
             exists: true
         });
+
+        if (meta.encrypted) sealedCEK[trackId] = wrappedCEK;
 
         // 若未指定收益方，默认艺人拿 100%
         if (royalties.length == 0) {
@@ -224,97 +248,62 @@ contract SonicMint {
             }
         }
 
-        emit TrackRegistered(trackId, msg.sender, container, title, partCount);
+        emit TrackRegistered(trackId, msg.sender, container, meta.title, meta.genre, meta.encrypted);
     }
 
     // ───────────────────────── 播放 ─────────────────────────
 
     /**
-     * @notice 播放一首曲目（不收费，仅记账）
-     * @dev    需满足其一：免费唱片 / 已买断 / 订阅有效期内
-     *         订阅期内播放非免费且未买断的曲目才计入池子，由 settleTrack 结算
+     * @notice 记录一次播放（不收费）
+     * @dev    需满足其一：免费唱片 / 已买断。加密与否由前端凭 vault 判定，链上只做记账
      */
     function play(uint256 trackId) external nonReentrant {
         Track storage track = tracks[trackId];
         require(track.exists, "track not found");
-
-        bool unlocked = track.free || purchased[msg.sender][trackId];
-        bool subbed = block.timestamp < subscriptionExpiry[msg.sender];
-        require(unlocked || subbed, "buy or subscribe first");
-
-        if (subbed && !unlocked) {
-            track.pendingPlays++;
-            totalPendingPlays++;
-        }
+        require(track.free || purchased[msg.sender][trackId], "buy first");
 
         unchecked { track.playCount++; }
-        emit TrackPlayed(trackId, msg.sender, unlocked);
+        emit TrackPlayed(trackId, msg.sender, true);
     }
 
     // ───────────────────────── 买断 ─────────────────────────
 
     /**
      * @notice 买断一首曲目，永久可听；收入即时按版税比例分流
+     * @param buyerPubKey 买家的 X25519 公钥，供 keeper 封装 vault；加密曲目必填
      */
-    function buy(uint256 trackId) external payable nonReentrant {
+    function buy(uint256 trackId, bytes32 buyerPubKey) external payable nonReentrant {
         Track storage track = tracks[trackId];
         require(track.exists, "track not found");
         require(!track.free, "free track");
         require(!purchased[msg.sender][trackId], "already purchased");
         require(msg.value >= track.price, "below price");
+        if (track.encrypted) require(buyerPubKey != bytes32(0), "buyer pubkey = 0");
 
         purchased[msg.sender][trackId] = true;
+        if (buyerPubKey != bytes32(0)) userPubKey[msg.sender] = buyerPubKey;
         track.totalEarned += msg.value;
         _distributeRoyalties(trackId, msg.value);
 
-        emit TrackPurchased(trackId, msg.sender, msg.value);
+        emit TrackPurchased(trackId, msg.sender, msg.value, buyerPubKey);
     }
 
-    // ───────────────────────── 订阅 ─────────────────────────
+    // ───────────────────────── 密钥管家 ─────────────────────────
 
     /**
-     * @notice 订阅 months 个月（1–12），费用进入池子，按播放占比结算给艺人
-     *         msg.value 须等于 months × monthlyFee
+     * @notice 写入某用户的全量 vault（keeper 在链下合并所有已购曲目的 K 后整体覆盖）
+     * @param user    用户地址
+     * @param payload 封给 userPubKey 的 TAP-10 载荷
      */
-    function subscribe(uint256 months) external payable nonReentrant {
-        require(months >= 1 && months <= MAX_MONTHS, "months 1-12");
-        uint256 amount = monthlyFee * months;
-        require(msg.value == amount, "wrong fee");
-        subscriptionPool += amount;
-
-        // 未过期则续期，已过期则从当前时间起算
-        uint256 base = subscriptionExpiry[msg.sender];
-        if (base < block.timestamp) base = block.timestamp;
-        subscriptionExpiry[msg.sender] = base + months * MONTH;
-
-        emit Subscribed(msg.sender, subscriptionExpiry[msg.sender], months, amount);
+    function setVault(address user, bytes calldata payload) external {
+        require(msg.sender == keeper || msg.sender == platform, "only keeper");
+        require(user != address(0), "user = zero");
+        _vault[user] = payload;
+        emit VaultUpdated(user, payload.length);
     }
 
-    // ───────────────────────── 结算 ─────────────────────────
-
-    /**
-     * @notice 结算某首曲目的订阅播放收益（任何人可调用）
-     *         从池子中按该曲目播放占比分配给其收益方
-     */
-    function settleTrack(uint256 trackId) external nonReentrant {
-        Track storage track = tracks[trackId];
-        require(track.exists, "track not found");
-        uint256 plays = track.pendingPlays;
-        require(plays > 0, "no pending plays");
-        require(totalPendingPlays > 0, "nothing to settle");
-        require(subscriptionPool > 0, "pool empty");
-
-        uint256 share = (subscriptionPool * plays) / totalPendingPlays;
-        require(share > 0, "share = 0");
-
-        track.pendingPlays = 0;
-        totalPendingPlays -= plays;
-        subscriptionPool -= share;
-        track.totalEarned += share;
-
-        _distributeRoyalties(trackId, share);
-
-        emit TrackSettled(trackId, plays, share);
+    function vaultOf(address user) external view returns (bytes memory) {
+        return _vault[user];
     }
 
     // ───────────────────────── 平台管理 ─────────────────────────
@@ -331,10 +320,10 @@ contract SonicMint {
         platformBps = _bps;
     }
 
-    function setMonthlyFee(uint256 _fee) external {
+    function setKeeper(address _keeper) external {
         require(msg.sender == platform, "only platform");
-        monthlyFee = _fee;
-        emit MonthlyFeeUpdated(_fee);
+        keeper = _keeper;
+        emit KeeperUpdated(_keeper);
     }
 
     /// @notice 更换允许发行唱片的处理器；传 address(0) 表示不限制
@@ -365,7 +354,7 @@ contract SonicMint {
         for (uint256 i = offset; i < end; i++) result[i - offset] = tracks[i];
     }
 
-    /// @notice 批量查询买断状态（配合 isSubscriber 判断某曲目当前用户能否播放）
+    /// @notice 批量查询买断状态，配合 getTracks 判断当前用户能否播放
     function getPurchased(address user, uint256 offset, uint256 limit)
         external view returns (bool[] memory result)
     {
@@ -374,9 +363,5 @@ contract SonicMint {
         if (offset >= end) return result;
         result = new bool[](end - offset);
         for (uint256 i = offset; i < end; i++) result[i - offset] = purchased[user][i];
-    }
-
-    function isSubscriber(address user) external view returns (bool) {
-        return block.timestamp < subscriptionExpiry[user];
     }
 }

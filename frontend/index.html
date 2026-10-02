@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>声刻 · 链上音乐</title>
-  <meta name="description" content="声刻 SonicMint：播放链上永久音乐，支持订阅畅听与一次买断，版税即时结算。" />
+  <meta name="description" content="声刻 SonicMint：播放链上永久音乐，一次买断永久可听，付费曲目加密上链，版税即时结算。" />
   <meta name="theme-color" content="#5b4be0" />
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235b4be0'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle'%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E" />
@@ -42,11 +42,6 @@
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
         <div class="topbar__right">
-          <span id="subBadge" class="badge badge--vip" hidden>
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 18h14l1.6-9.2-4.2 2.9L12 5.2 7.6 11.7 3.4 8.8 5 18z"/><rect x="5" y="19.2" width="14" height="1.6" rx=".8"/></svg>
-            <span data-i18n="nav.subscribed">订阅中</span>
-          </span>
-          <button id="subscribeBtn" class="btn btn--ghost" hidden data-i18n="nav.subscribe">订阅</button>
           <span id="chainBadge" class="badge" data-i18n="nav.unconnected">未连接</span>
           <button id="langToggle" class="icon-btn lang-btn" aria-label="切换语言">中</button>
           <button id="connectBtn" class="btn btn--primary topbar__wallet" data-i18n="nav.connect">连接钱包</button>
@@ -82,7 +77,7 @@
             <span data-i18n="hero.title1">链上曲库</span><br />
             <span class="hero__accent" data-i18n="hero.title2">永久可播放的音乐</span>
           </h1>
-          <p class="muted" data-i18n="hero.desc">所有音频存于 TapeOut 链上容器，版税由智能合约即时结算。订阅可免费播放，或按次付费点播。</p>
+          <p class="muted" data-i18n="hero.desc">所有音频存于 TapeOut 链上容器，付费曲目加密上链；一次买断永久可听，版税由智能合约即时结算。</p>
         </div>
       </section>
 
@@ -139,7 +134,7 @@
             <span data-i18n="hero.title1">链上曲库</span><br />
             <span class="hero__accent" data-i18n="hero.title2">永久可播放的音乐</span>
           </h1>
-          <p class="muted" data-i18n="hero.desc">所有音频存于 TapeOut 链上容器，版税由智能合约即时结算。订阅可免费播放，或按次付费点播。</p>
+          <p class="muted" data-i18n="hero.desc">所有音频存于 TapeOut 链上容器，付费曲目加密上链；一次买断永久可听，版税由智能合约即时结算。</p>
           <div class="hero__actions">
             <button id="heroCta" type="button" class="btn btn--primary" data-i18n="hero.cta1">发行我的唱片</button>
             <a href="./rules.html" class="btn btn--ghost" data-i18n="hero.cta2">了解规则</a>
@@ -163,6 +158,21 @@
             <span id="circuitInfo" class="muted small" data-i18n="pub.circuitHint">仅列出处理器 #260 下你持有的电路；容器未开通的需先去 id.tapeout.link 开通。</span>
           </div>
           <div class="form__row">
+            <label data-i18n="pub.genre">分类</label>
+            <select id="inGenre">
+              <option value="0" data-i18n="genre.0">流行</option>
+              <option value="1" data-i18n="genre.1">摇滚</option>
+              <option value="2" data-i18n="genre.2">电子</option>
+              <option value="3" data-i18n="genre.3">嘻哈</option>
+              <option value="4" data-i18n="genre.4">民谣</option>
+              <option value="5" data-i18n="genre.5">爵士</option>
+              <option value="6" data-i18n="genre.6">古典</option>
+              <option value="7" data-i18n="genre.7">国风</option>
+              <option value="8" data-i18n="genre.8">纯音乐</option>
+              <option value="9" data-i18n="genre.9">播客</option>
+            </select>
+          </div>
+          <div class="form__row">
             <label data-i18n="pub.audio">音频文件</label>
             <input id="inFile" type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/flac" />
             <span id="fileInfo" class="muted small"></span>
@@ -182,13 +192,13 @@
           <div class="form__row" id="priceRow">
             <label data-i18n="pub.price">买断价（OKB）</label>
             <input id="inPrice" type="number" min="0" step="0.001" placeholder="例如 0.05" />
-            <span class="muted small" data-i18n="pub.priceTip">用户一次购买后永久可听；订阅用户可直接播放</span>
+            <span class="muted small" data-i18n="pub.priceTip">用户一次购买后永久可听；付费曲目会上链加密，仅购买者可播放。</span>
           </div>
 
           <div class="form__row">
             <label class="checkbox-row">
               <input id="inFree" type="checkbox" />
-              <span data-i18n="pub.free">免费唱片（所有人免费听，不分钱、不计入订阅池子，仅用于推广）</span>
+              <span data-i18n="pub.free">免费唱片（所有人免费听，不加密、不分钱，仅用于推广）</span>
             </label>
           </div>
 
@@ -222,10 +232,6 @@
             <div id="statEarned" class="creator__num">0</div>
             <div class="creator__label" data-i18n="creator.earned">累计版税</div>
           </div>
-          <div class="creator__stat">
-            <div id="statPending" class="creator__num">0</div>
-            <div class="creator__label" data-i18n="creator.pending">待结算播放</div>
-          </div>
         </div>
         <div class="creator__detail">
           <div id="creatorDetailList"></div>
@@ -235,17 +241,6 @@
 
     <!-- ───── 个人 ───── -->
     <section class="panel" data-panel="profile" hidden>
-      <section class="card">
-        <div class="card__head">
-          <h2 data-i18n="profile.subTitle">我的订阅</h2>
-        </div>
-        <div class="profile-row">
-          <span id="subState" class="muted">—</span>
-          <button id="subActionBtn" class="btn btn--primary btn--sm" data-i18n="profile.subscribe">订阅</button>
-        </div>
-        <p class="muted small" data-i18n="profile.subTip">订阅后畅听全站音乐；单曲也可一次买断永久可听。</p>
-      </section>
-
       <section class="card">
         <div class="card__head">
           <h2 data-i18n="profile.purchased">我购买的音乐</h2>
@@ -303,6 +298,7 @@
   </div>
 
   <script src="./ethers.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js'"></script>
+  <script src="./crypto.js"></script>
   <script src="./lang.js"></script>
   <script src="./app.js"></script>
 </body>

@@ -9,12 +9,17 @@
     "deploy": "node scripts/deploy.js",
     "upload-audio": "node scripts/upload-audio.js",
     "publish-site": "node scripts/publish-site.js",
+    "build:crypto": "node scripts/build-crypto.js",
+    "build:keeper": "node scripts/build-keeper.js",
+    "keeper:key": "node scripts/keeper-key.js",
+    "deploy:keeper": "npx --yes wrangler@latest deploy --config keeper/wrangler.toml",
     "deploy:web": "npx --yes wrangler@latest pages deploy frontend --project-name sonicmint --branch main"
   },
   "dependencies": {
     "ethers": "^6.13.4"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "solc": "^0.8.28"
   }
 }
