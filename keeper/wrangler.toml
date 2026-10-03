@@ -6,8 +6,13 @@ main = "dist/worker.js"
 compatibility_date = "2025-01-01"
 no_bundle = true
 
+# 自定义域名：workers.dev 在大陆被 DNS 污染，必须走自有域名
+routes = [
+  { pattern = "keeper.tapeout.link", custom_domain = true }
+]
+
 [vars]
 CHAIN_ID = "196"
 RPC_URL = "https://rpc.xlayer.tech"
 # 合约地址：SonicMint 每次重部署后须同步更新（同时决定 keeper 公钥）
-CONTRACT = "0xDcFe709728E085cD59Bb10fd09AbA657BF68b087"
+CONTRACT = "0xb0750Dc0071e8C889b0f1845936eA68E99a0013E"

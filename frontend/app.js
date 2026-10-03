@@ -14,7 +14,7 @@ const NETWORKS = {
     siteRegistry:     "0xd6efb7adcc9c83dc4924ad56f6a8e4e969b9adb6", // TapeOut 网站注册表（Base / X Layer 同址）
     containerOpener:  "0x536add8f30f03b69f6fbf29d425a816a0dc50106", // TapeOut 容器开启器
     processorFactory: "0x1f09daefa827f02cbb40967cc91b259763760761", // TapeOut 处理器工厂
-    music:            "0xDcFe709728E085cD59Bb10fd09AbA657BF68b087",
+    music:            "0xb0750Dc0071e8C889b0f1845936eA68E99a0013E",
   },
 };
 
@@ -31,11 +31,11 @@ const PROCESSOR_NO = 260;
 const GENRES = ["pop", "rock", "electronic", "hiphop", "folk", "jazz", "classical", "gufeng", "instrumental", "podcast"];
 // 平台密钥管家（keeper）：封装/解封曲目内容密钥 K。部署后由 scripts/keeper-key.js 生成并回填
 const KEEPER = {
-  address: "0x0000000000000000000000000000000000000000",
-  publicKey: "0x0000000000000000000000000000000000000000000000000000000000000000", // keeper 的 X25519 公钥
+  address: "0xE2f67d8AaefDfe8622E8dDDEF6f0D9fcda2db750",
+  publicKey: "0x674e24a28533783cd9d3dd25fbd8b56789eff2235d3f4405291e80f7b3e95127", // keeper 的 X25519 公钥
 };
-// 购买后通知 keeper 封装 vault；须替换为实际 Worker 地址（wrangler deploy 输出，形如 https://sonicmint-keeper.<账号子域>.workers.dev/sync）
-const KEEPER_SYNC = "https://sonicmint-keeper.workers.dev/sync";
+// 购买后通知 keeper 封装 vault；走自定义域名（workers.dev 在大陆被 DNS 污染）
+const KEEPER_SYNC = "https://keeper.tapeout.link/sync";
 // 电路 NFT（处理器合约）只读接口
 const CIRCUIT_ABI = [
   "function ownerOf(uint256) view returns (address)",
@@ -805,9 +805,11 @@ async function loadCircuits() {
     }
 
     if (mine.length === 0) {
-      sel.disabled = true;
+      // 保持可点击（禁用会让用户以为点了没反应），把原因写在提示里
+      sel.disabled = false;
       sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;
-      syncCircuitInfo();
+      info.textContent = `处理器 #${PROCESSOR_NO} 下未找到 ${shortAddr(account)} 持有的电路`;
+      info.style.color = "var(--danger)";
       return;
     }
     sel.innerHTML = mine
@@ -815,7 +817,7 @@ async function loadCircuits() {
       .join("");
     syncCircuitInfo();
   } catch (e) {
-    sel.disabled = true;
+    sel.disabled = false;
     sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;
     info.textContent = "加载电路失败：" + (e.reason || e.message);
     info.style.color = "var(--danger)";
