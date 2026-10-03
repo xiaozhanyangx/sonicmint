@@ -1,5 +1,5 @@
 /* 声刻 SonicMint PWA Service Worker：离线缓存静态资源 */
-const CACHE = "sonicmint-v49";
+const CACHE = "sonicmint-v65";
 const ASSETS = [
   "./",
   "./index.html",
@@ -29,6 +29,9 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
+  // 导航请求交给浏览器：clean URL（如 /rules）会被 Pages 308 到 /rules.html，
+  // 而 SW 不允许把「跟随过重定向」后的响应交给导航请求，否则报 ERR_FAILED
+  if (e.request.mode === "navigate") return;
   e.respondWith(
     caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
       const copy = res.clone();

@@ -3,6 +3,9 @@
  * 特性：X Layer / 买断制 / 加密上链 / 分类 / 多方版税 / 无损分片
  * ============================================================ */
 
+// 前端版本：与 sw.js 的 CACHE 版本同步维护，展示在侧边栏底部
+const APP_VERSION = "v65";
+
 // ───────── 链配置（仅 X Layer）─────────
 // 核心合约地址需从 TapeOut 官方 X Layer 部署文档获取后填入
 const NETWORKS = {
@@ -23,7 +26,6 @@ let currentNetwork = NETWORKS[196];
 
 const CHUNK_MAX = 24000;
 const FILE_MAX  = 8_400_000;
-const GATEWAY   = "https://{id}-{cpu}.tapekit.org";
 
 // 浏览器对 AAC/M4A 的 MIME 判定不一致，统一按扩展名兜底
 const AUDIO_MIME = {
@@ -39,6 +41,8 @@ const pathMime = (path) => AUDIO_MIME[extOf(path)] || "audio/mpeg";
 
 // 唯一允许发行的处理器编号（须与合约 allowedProcessor 一致）
 const PROCESSOR_NO = 260;
+// TapeOut 链区号（X Layer = 2）：容器名 = tokenId.区号.cpu，如 1.2.260
+const CHAIN_AREA = 2;
 // 音频分类：索引即合约里的 genre（0..MAX_GENRE），文案见 lang.js 的 genre.N
 const GENRES = ["pop", "rock", "electronic", "hiphop", "folk", "jazz", "classical", "gufeng", "instrumental", "podcast"];
 // 平台密钥管家（keeper）：封装/解封曲目内容密钥 K。部署后由 scripts/keeper-key.js 生成并回填
@@ -60,6 +64,7 @@ const SITE_REGISTRY_ABI = [
   "function appendChunk(address container, string path, uint256 expectIndex, bytes chunk)",
   "function setOperator(address container, address op, uint256 ttl)",
   "function fileInfo(address container, string path) view returns (uint256, string, bytes32, uint256, uint256)",
+  "function readRange(address container, string path, uint256 offset, uint256 len) view returns (bytes)",
 ];
 const CONTAINER_OPENER_ABI = [
   "function accountOf(address processor, uint256 tokenId) view returns (address)",
@@ -104,11 +109,81 @@ function concatBytes(chunks) {
   return out;
 }
 
-// 资源 URL：完整地址原样返回，链上曲目走网关
+// ───────── 链上读取 ─────────
+// tapekit.org 是指南页网关：它对每条路径都返回同一个引导页，拿不到文件字节，
+// 所以音频/封面/歌词一律自己从 SiteRegistry.readRange 读。
+const READ_SEG = 1_200_000; // 单次 readRange 实测可返回约 1.2MB
+
+let readProvider = null;
+const fileCache = new Map();  // `${container}:${path}` → { bytes, type }
+const blobCache = new Map();  // 同上 → blob URL（给 img / audio 用）
+
+// 专用只读 provider：不借钱包节点，避免几十次 view 调用被钱包限流
+function chainReader() {
+  if (!readProvider) readProvider = new ethers.JsonRpcProvider(currentNetwork.rpc);
+  return readProvider;
+}
+
+// 读一个链上文件，带内存缓存
+async function chainFile(t, path) {
+  const key = `${t.container}:${path}`;
+  const hit = fileCache.get(key);
+  if (hit) return hit;
+  const reg = new ethers.Contract(currentNetwork.siteRegistry, SITE_REGISTRY_ABI, chainReader());
+  const info = await reg.fileInfo(t.container, path);
+  const size = Number(info[0]);
+  if (!size) throw new Error(`容器里没有 ${path}`);
+  const parts = [];
+  for (let off = 0; off < size; off += READ_SEG) {
+    const raw = await reg.readRange(t.container, path, off, Math.min(READ_SEG, size - off));
+    parts.push(ethers.getBytes(raw));
+  }
+  const out = { bytes: concatBytes(parts), type: info[1] || "" };
+  fileCache.set(key, out);
+  return out;
+}
+
+// 读成 blob URL（图片用；audio 直接拿 bytes 解密后再建 blob）
+async function chainBlobUrl(t, path) {
+  const key = `${t.container}:${path}`;
+  const hit = blobCache.get(key);
+  if (hit) return hit;
+  const { bytes, type } = await chainFile(t, path);
+  const url = URL.createObjectURL(new Blob([bytes], { type: type || "application/octet-stream" }));
+  blobCache.set(key, url);
+  return url;
+}
+
+// 资源 URL：只认已就绪的 blob；未命中返回空串（模板显示占位），后台读完再重绘
 function fileUrl(t, path) {
   if (!path) return "";
   if (/^(blob:|data:|https?:)/.test(path)) return path;
-  return `${GATEWAY.replace("{id}", t.tokenId).replace("{cpu}", t.cpu)}/${path}`;
+  return blobCache.get(`${t.container}:${path}`) || "";
+}
+
+let coverRefreshPending = false;
+function refreshAfterAsset() {
+  if (coverRefreshPending) return;
+  coverRefreshPending = true;
+  setTimeout(() => {
+    coverRefreshPending = false;
+    renderTracks();
+    renderQueue();
+    // 迷你播放条已显示时同步刷新封面（不主动展开，避免没播放就冒出来）
+    const mini = $("miniPlayer");
+    if (currentTrackIdx != null && mini && !mini.hidden && tracksCache[currentTrackIdx]) {
+      fillMini(tracksCache[currentTrackIdx]);
+      syncLyrics(); // fillMini 会写回艺人名，歌词行要立刻补回来
+    }
+  }, 50);
+}
+
+// 后台把封面读进 blob 缓存；到达后重绘（此时重绘是瞬时的）
+function preloadCovers(tracks) {
+  tracks.forEach((t) => {
+    if (!t.coverPath || blobCache.has(`${t.container}:${t.coverPath}`)) return;
+    chainBlobUrl(t, t.coverPath).then(refreshAfterAsset).catch((e) => console.warn("封面读取失败", e));
+  });
 }
 
 // ───────── 轻提示（替代 alert，不阻塞交互）─────────
@@ -317,7 +392,8 @@ let uploading = false;                // 上传进行中：拦截关闭/刷新
 // 授权临时密钥写容器并注入 gas，返回可静默签名的 registry 实例
 // 注资按最大费率预付，实际用量约一半，差额在 closeOperator 里退回
 async function openOperator(container, chunkCount, onStatus) {
-  const burner = ethers.Wallet.createRandom(); // 仅存内存，刷新即丢
+  // connect 一次，之后既当签名者又当合约 runner；不 connect 的话收尾退款会报 missing provider
+  const burner = ethers.Wallet.createRandom().connect(provider); // 仅存内存，刷新即丢
   // 先登记，后续任一步失败都能在失败分支里把余额退回
   pendingOp = { burner, container, authorized: false };
   syncRevokeBtn();
@@ -332,7 +408,7 @@ async function openOperator(container, chunkCount, onStatus) {
   await (await registryContract.setOperator(container, burner.address, OP_TTL)).wait();
   pendingOp.authorized = true;
 
-  return new ethers.Contract(currentNetwork.siteRegistry, SITE_REGISTRY_ABI, burner.connect(provider));
+  return new ethers.Contract(currentNetwork.siteRegistry, SITE_REGISTRY_ABI, burner);
 }
 
 // 收尾：撤销授权（ttl 传 0 即立即过期），并把没花完的 gas 退回；密钥随即丢弃
@@ -359,6 +435,9 @@ function syncRevokeBtn() {
 }
 
 // ─── 文件信息与 gas 预估（音频 + 封面合计）───
+const SIZE_WARN_BYTES = 3 * 1024 * 1024; // 超过此体积提示压缩
+const SEC_PER_CHUNK = 0.4;               // 每块约 0.3~0.5s：发送串行 + 出块，取中值
+
 async function gasPriceNow() {
   if (!provider) return FALLBACK_GAS_PRICE;
   try { return (await provider.getFeeData()).gasPrice || FALLBACK_GAS_PRICE; }
@@ -368,20 +447,32 @@ async function gasPriceNow() {
 async function renderFileInfo() {
   const audio = $("inFile") && $("inFile").files[0];
   const cover = $("inCover") && $("inCover").files[0];
-  const aInfo = $("fileInfo"), cInfo = $("coverInfo");
+  const aInfo = $("fileInfo"), cInfo = $("coverInfo"), warn = $("sizeWarn");
+  const chunks = audio ? Math.ceil(audio.size / CHUNK_MAX) + (cover ? Math.ceil(cover.size / CHUNK_MAX) : 0) : 0;
 
   if (aInfo) {
     if (!audio) aInfo.textContent = "";
     else {
       const mb = (audio.size / 1024 / 1024).toFixed(2);
       const parts = Math.ceil(audio.size / FILE_MAX);
-      const chunks = Math.ceil(audio.size / CHUNK_MAX) + (cover ? Math.ceil(cover.size / CHUNK_MAX) : 0);
       const okb = Number(ethers.formatEther(GAS_PER_CHUNK * BigInt(chunks) * (await gasPriceNow()))).toFixed(4);
-      aInfo.textContent = `${audio.name} · ${mb} MB${parts > 1 ? ` · 将分 ${parts} 片上传` : ""} · ${chunks} 块 · 预计 gas ≈ ${okb} OKB`;
+      const secs = Math.round(chunks * SEC_PER_CHUNK);
+      const eta = secs < 60 ? `${secs} 秒` : `${Math.ceil(secs / 60)} 分钟`;
+      aInfo.textContent = `${audio.name} · ${mb} MB${parts > 1 ? ` · 将分 ${parts} 片上传` : ""} · ${chunks} 块 · 预计 gas ≈ ${okb} OKB · 约 ${eta}`;
     }
   }
   if (cInfo) {
     cInfo.textContent = cover ? `${cover.name} · ${(cover.size / 1024 / 1024).toFixed(2)} MB` : "";
+  }
+  if (warn) {
+    if (audio && audio.size > SIZE_WARN_BYTES) {
+      warn.hidden = false;
+      warn.style.color = "var(--accent)";
+      warn.textContent = `体积偏大：约 ${chunks} 次链上写入。块数与 gas 按体积等比上升，压到 128 kbps 左右再传可省一半以上。`;
+    } else {
+      warn.hidden = true;
+      warn.textContent = "";
+    }
   }
 }
 
@@ -392,6 +483,7 @@ function resetUploadForm() {
   if ($("inGenre")) $("inGenre").value = "0";
   if ($("inPrice")) $("inPrice").value = "";
   $("fileInfo").textContent = ""; $("coverInfo").textContent = "";
+  if ($("sizeWarn")) { $("sizeWarn").hidden = true; $("sizeWarn").textContent = ""; }
   royaltyRecipients = []; renderRoyaltyList();
   $("uploadBtn").disabled = false;
 }
@@ -544,8 +636,9 @@ async function uploadAudio() {
     }
 
     // ─── 上传完毕，撤销临时授权并退回剩余 gas ───
+    // 收尾失败不阻断发行：内容已经写完，不该为一笔退款让整次上传作废
     status.textContent = "撤销临时授权，退回剩余 gas…";
-    await closeOperator();
+    try { await closeOperator(); } catch (e) { console.warn("closeOperator failed", e); }
 
     // 注册曲目
     status.textContent = "注册曲目…";
@@ -591,6 +684,7 @@ async function fetchTracks() {
   tracksCache = count === 0 ? [] : await musicContract.getTracks(0, count);
   // 当前用户的买断状态（与 tracksCache 同索引）
   purchasedCache = account ? await musicContract.getPurchased(account, 0, count).catch(() => []) : [];
+  preloadCovers(tracksCache); // 封面后台读链，到达后自动重绘
 }
 
 async function loadTracks() {
@@ -656,15 +750,22 @@ function trackRowHtml(i) {
   const genreTag = `<span class="tag">${T("genre." + Number(t.genre))}</span>`;
   // 买断价：付费且未买断时显示在信息行
   const priceInfo = locked ? `<span class="tag tag--price">${ethers.formatEther(t.price)} ${sym()}</span>` : "";
+  // TapeOut 容器名：tokenId.区号.cpu，便于在 TapeOut 侧定位该容器
+  const containerId = `${Number(t.tokenId)}.${CHAIN_AREA}.${Number(t.cpu)}`;
   return `
     <div class="track${locked ? " is-locked" : ""}" data-track="${i}">
-      <div class="track__icon">${coverUrl ? `<img src="${coverUrl}" class="track__cover" alt="封面" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" /><span style="display:none">🎵</span>` : "🎵"}</div>
+      <div class="track__art">
+        ${coverUrl
+          ? `<img src="${coverUrl}" class="track__cover" alt="封面" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" /><span class="track__fallback" style="display:none">🎵</span>`
+          : `<span class="track__fallback">🎵</span>`}
+        ${stateTag ? `<div class="track__state">${stateTag}</div>` : ""}
+      </div>
       <div class="track__body">
-        <div class="track__title">${escapeHtml(t.title)} ${stateTag}</div>
+        <div class="track__title">${escapeHtml(t.title)}</div>
+        <div class="track__artist">${escapeHtml(t.artistName)}</div>
         <div class="track__meta">
-          <span>${escapeHtml(t.artistName)}</span>
-          <span class="track__plays">▶ ${Number(t.playCount)} 次</span>
           ${genreTag}
+          <span class="track__cid" title="TapeOut 容器">${containerId}</span>
           ${priceInfo}
         </div>
       </div>
@@ -733,30 +834,38 @@ async function loadProfile() {
 }
 
 // ───────── 迷你播放条 ─────────
-function fillMini(t) {
-  $("miniPlayer").hidden = false;
-  document.body.classList.add("has-mini");   // 为底部浮窗留出空间
-  $("miniTitle").textContent = t.title;
-  $("miniArtist").textContent = t.artistName;
-  const img = $("miniCover"), fb = $("miniCoverFallback");
-  if (t.coverPath) {
-    img.src = fileUrl(t, t.coverPath);
+// 同步一个 Hero 黑胶中心的封面（音乐广场、发行页各有一个）
+function syncHeroCover(imgId, fbId, t) {
+  const img = $(imgId), fb = $(fbId);
+  if (!img || !fb) return;
+  const url = t && t.coverPath ? fileUrl(t, t.coverPath) : "";
+  if (url) {
+    img.src = url;
     img.hidden = false; fb.hidden = true;
     img.onerror = () => { img.hidden = true; fb.hidden = false; };
   } else {
     img.hidden = true; fb.hidden = false;
   }
-  // 同步 Hero 黑胶中心封面
-  const hc = $("heroCover"), hf = $("heroCoverFallback");
-  if (hc) {
-    if (t.coverPath) {
-      hc.src = fileUrl(t, t.coverPath);
-      hc.hidden = false; hf.hidden = true;
-      hc.onerror = () => { hc.hidden = true; hf.hidden = false; };
-    } else {
-      hc.hidden = true; hf.hidden = false;
-    }
+}
+
+function fillMini(t) {
+  $("miniPlayer").hidden = false;
+  document.body.classList.add("has-mini");   // 为底部浮窗留出空间
+  $("miniTitle").textContent = t.title;
+  $("miniArtist").textContent = t.artistName;
+  // 封面从链上异步读，未就绪时先显示占位（避免 img 拿到空 src 报错）
+  const img = $("miniCover"), fb = $("miniCoverFallback");
+  const coverUrl = t.coverPath ? fileUrl(t, t.coverPath) : "";
+  if (coverUrl) {
+    img.src = coverUrl;
+    img.hidden = false; fb.hidden = true;
+    img.onerror = () => { img.hidden = true; fb.hidden = false; };
+  } else {
+    img.hidden = true; fb.hidden = false;
   }
+  // 两个 Hero 的黑胶中心封面
+  syncHeroCover("heroCover", "heroCoverFallback", t);       // 发行页
+  syncHeroCover("libHeroCover", "libHeroCoverFallback", t); // 音乐广场
 }
 
 // 同步播放/暂停图标（svg 无 hidden 属性，须用 attribute 控制）
@@ -773,7 +882,13 @@ function syncPlayIcon() {
 function togglePlay() {
   const audio = $("audio");
   if (!audio.src) { const p = playableIdx(); if (p.length) playTrack(p[0]); return; }
-  if (audio.paused) audio.play().catch(() => {}); else audio.pause();
+  if (audio.paused) {
+    // 之前被自动播放策略拦下留下的提示，在用户点播时换回艺人名
+    const mini = $("miniArtist");
+    if (mini && currentTrackIdx != null && mini.textContent === T("player.ready"))
+      mini.textContent = tracksCache[currentTrackIdx].artistName;
+    audio.play().catch(() => {});
+  } else audio.pause();
 }
 
 // ───────── 「我的曲库」抽屉 ─────────
@@ -804,21 +919,18 @@ function renderQueue() {
 function openQueue() { const q = $("queue"); if (!q) return; renderQueue(); q.hidden = false; }
 function closeQueue() { const q = $("queue"); if (q) q.hidden = true; }
 
-// ───────── 播放（加密曲目解密 / 分片合并）─────────
-// 下载完整音频字节（分片则合并）
+// ───────── 播放（链上读取 / 加密解密 / 分片合并）─────────
+// 取完整音频字节（分片则依次读回后合并）
 async function fetchAudioBytes(t) {
   const partCount = Number(t.partCount);
   if (partCount <= 1) {
-    const res = await fetch(fileUrl(t, t.audioPath));
-    if (!res.ok) throw new Error("音频加载失败");
-    return new Uint8Array(await res.arrayBuffer());
+    const { bytes } = await chainFile(t, t.audioPath);
+    return bytes;
   }
-  const baseUrl = GATEWAY.replace("{id}", t.tokenId).replace("{cpu}", t.cpu);
   const chunks = [];
   for (let i = 0; i < partCount; i++) {
-    const res = await fetch(`${baseUrl}/${t.audioPath}.part${i}`);
-    if (!res.ok) throw new Error(`分片 ${i} 加载失败`);
-    chunks.push(new Uint8Array(await res.arrayBuffer()));
+    const { bytes } = await chainFile(t, `${t.audioPath}.part${i}`);
+    chunks.push(bytes);
   }
   return concatBytes(chunks);
 }
@@ -829,10 +941,14 @@ async function playTrack(idx) {
   if (!canPlay(idx)) { toast(account ? T("player.locked") : "请先连接钱包", "err"); return; }
 
   currentTrackIdx = idx;
-  lyricsLines = []; // 换曲后旧歌词作废，等用户重新打开歌词面板
+  lyricsLines = []; // 换曲后旧歌词作废
+  lyricsFor = null;
   activeLyric = -1;
+  seeking = false;
   markPlaying();
   fillMini(t);
+  // 后台取歌词：播放条副标题会随进度逐行跟随，无需打开歌词面板
+  ensureLyrics(idx).then((ok) => { if (ok) syncLyrics(); });
 
   const audio = $("audio");
   audio.onplay = syncPlayIcon;
@@ -840,25 +956,60 @@ async function playTrack(idx) {
   audio.onended = () => playNext(); // 自动连播下一曲
 
   try {
-    if (t.encrypted || Number(t.partCount) > 1) {
-      let bytes = await fetchAudioBytes(t);
-      if (t.encrypted) {
-        // 取自己的内容密钥 K（keeper 未就绪时轮询等待）
-        const keyHex = await vaultKeyFor(idx);
-        if (!keyHex) throw new Error("密钥尚未就绪，请稍后重试");
-        bytes = cryptoLib().decryptBytes(cryptoLib().hexToBytes(keyHex, 32), bytes);
-      }
-      audio.src = URL.createObjectURL(new Blob([bytes], { type: pathMime(t.audioPath) }));
-    } else {
-      audio.src = fileUrl(t, t.audioPath);
+    // 链上读取需要几秒（2.4MB 约 5s），先在播放条上给出反馈
+    if ($("miniArtist")) $("miniArtist").textContent = "正在从链上读取…";
+    let bytes = await fetchAudioBytes(t);
+    if (t.encrypted) {
+      // 取自己的内容密钥 K（keeper 未就绪时轮询等待）
+      const keyHex = await vaultKeyFor(idx);
+      if (!keyHex) throw new Error("密钥尚未就绪，请稍后重试");
+      bytes = cryptoLib().decryptBytes(cryptoLib().hexToBytes(keyHex, 32), bytes);
     }
+    fillMini(t); // 读完了，把「正在读取」换回曲目信息
+    audio.src = URL.createObjectURL(new Blob([bytes], { type: pathMime(t.audioPath) }));
+    syncSeek(); // 立刻归零，时长就绪后再由 loadedmetadata 补齐
     await audio.play();
   } catch (e) {
-    toast("无法播放：" + e.message, "err");
-    currentTrackIdx = null;
-    markPlaying();
+    // NotAllowedError：链上读取耗时超出用户手势有效期，自动播放被浏览器策略拦下。
+    // 音频此时已就绪，点 ▶ 即可，不算失败，也不该打断播放条状态。
+    if (e.name === "NotAllowedError") {
+      if ($("miniArtist")) $("miniArtist").textContent = T("player.ready");
+    } else {
+      toast("无法播放：" + e.message, "err");
+      currentTrackIdx = null;
+      markPlaying();
+    }
   }
   renderQueue();
+}
+
+// ───────── 播放进度条 ─────────
+let seeking = false; // 拖动中不随播放回写，避免抖动
+
+// 播放位置 → 进度条（0..1000，与时长无关，换曲自动适配）
+function syncSeek() {
+  const el = $("seekBar"), a = $("audio");
+  if (!el) return;
+  const dur = a.duration;
+  const ok = Number.isFinite(dur) && dur > 0;
+  el.disabled = !ok; // 时长未知（读取中）时不可拖
+  if (seeking) return;
+  el.value = ok ? String(Math.round((a.currentTime / dur) * 1000)) : "0";
+}
+
+// 拖动 → 跳转播放位置
+function bindSeek() {
+  const el = $("seekBar");
+  if (!el) return;
+  el.addEventListener("input", () => {
+    const a = $("audio");
+    if (!Number.isFinite(a.duration) || !a.duration) return;
+    seeking = true;
+    a.currentTime = (Number(el.value) / 1000) * a.duration;
+  });
+  const done = () => { seeking = false; };
+  el.addEventListener("change", done);
+  el.addEventListener("pointerup", done);
 }
 
 // ───────── 歌词（LRC 时间轴 / 纯文本）─────────
@@ -891,17 +1042,52 @@ function renderLyrics() {
     : `<p class="muted">${T("lyrics.none")}</p>`;
 }
 
-// 按播放进度高亮当前行并居中
+// 取歌词并解析（按曲目缓存，播放条与歌词面板共用同一份）
+let lyricsFor = null;
+async function ensureLyrics(idx) {
+  if (lyricsFor === idx && lyricsLines.length) return true;
+  lyricsLines = [];
+  activeLyric = -1;
+  lyricsFor = null;
+  const t = tracksCache[idx];
+  if (!t || !t.lyricsPath || !canPlay(idx)) return false;
+  try {
+    let { bytes } = await chainFile(t, t.lyricsPath);
+    if (t.encrypted) {
+      // 歌词与音频共用同一把 K，来自链上 vault
+      const keyHex = await vaultKeyFor(idx);
+      if (!keyHex) return false;
+      bytes = cryptoLib().decryptBytes(cryptoLib().hexToBytes(keyHex, 32), bytes);
+    }
+    lyricsLines = parseLyrics(new TextDecoder().decode(bytes));
+    lyricsFor = idx;
+    return lyricsLines.length > 0;
+  } catch (e) {
+    console.warn("lyrics failed", e);
+    return false;
+  }
+}
+
+// 播放进度变化：播放条逐行跟随 + 歌词面板高亮居中
 function syncLyrics() {
-  const list = $("lyricsList"), sheet = $("lyricsSheet");
-  if (!list || !sheet || sheet.hidden || !lyricsLines.length) return;
+  if (!lyricsLines.length) return;
   const cur = $("audio").currentTime;
   let idx = -1;
   for (let i = 0; i < lyricsLines.length; i++) {
-    if (lyricsLines[i].t < 0) continue;
+    if (lyricsLines[i].t < 0) continue; // 纯文本歌词没有时间轴，不参与滚动
     if (lyricsLines[i].t <= cur) idx = i;
     else break;
   }
+  // 播放条副标题跟随当前行；没到第一句（或纯文本）时仍显示艺人名
+  const mini = $("miniArtist");
+  if (mini && currentTrackIdx != null && !$("miniPlayer").hidden) {
+    const t = tracksCache[currentTrackIdx];
+    const want = idx >= 0 ? lyricsLines[idx].text : (t ? t.artistName : "");
+    if (mini.textContent !== want) mini.textContent = want;
+  }
+  // 歌词面板：高亮并居中
+  const list = $("lyricsList"), sheet = $("lyricsSheet");
+  if (!list || !sheet || sheet.hidden) return;
   if (idx === activeLyric) return;
   activeLyric = idx;
   list.querySelectorAll(".lyrics-line").forEach((el, i) => el.classList.toggle("is-active", i === idx));
@@ -916,29 +1102,16 @@ async function openLyrics() {
   if (!sheet || !list) return;
   if (currentTrackIdx == null) { toast(T("lyrics.noTrack"), "err"); return; }
   sheet.hidden = false;
-  lyricsLines = [];
-  activeLyric = -1;
   list.innerHTML = `<p class="muted">${T("lyrics.loading")}</p>`;
 
   const t = tracksCache[currentTrackIdx];
-  if (!t || !t.lyricsPath) { renderLyrics(); return; }
+  if (!t || !t.lyricsPath) { lyricsLines = []; renderLyrics(); return; }
   if (!canPlay(currentTrackIdx)) { list.innerHTML = `<p class="muted">${T("lyrics.locked")}</p>`; return; }
-  try {
-    const res = await fetch(fileUrl(t, t.lyricsPath));
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    let bytes = new Uint8Array(await res.arrayBuffer());
-    if (t.encrypted) {
-      // 歌词与音频共用同一把 K，来自链上 vault
-      const keyHex = await vaultKeyFor(currentTrackIdx);
-      if (!keyHex) throw new Error(T("lyrics.noKey"));
-      bytes = cryptoLib().decryptBytes(cryptoLib().hexToBytes(keyHex, 32), bytes);
-    }
-    lyricsLines = parseLyrics(new TextDecoder().decode(bytes));
+  if (await ensureLyrics(currentTrackIdx)) {
     renderLyrics();
     syncLyrics();
-  } catch (e) {
+  } else {
     lyricsLines = [];
-    console.warn("lyrics failed", e);
     list.innerHTML = `<p class="muted">${T("lyrics.fail")}</p>`;
   }
 }
@@ -1023,7 +1196,7 @@ function updateCreatorPanel() {
     return `
     <div class="creator__row">
       <span class="t">${escapeHtml(t.title)}</span>
-      <span class="m">▶ ${Number(t.playCount)} 次 · 💰 ${ethers.formatEther(t.totalEarned)} ${sym()}</span>
+      <span class="m">💰 ${ethers.formatEther(t.totalEarned)} ${sym()}</span>
     </div>`;
   }).join("");
 }
@@ -1090,8 +1263,30 @@ function syncCircuitInfo() {
   info.style.color = opened ? "var(--success)" : "var(--danger)";
 }
 
+// ───────── 版本号（侧边栏底部）─────────
+// 显示 app.js 自身的版本；再拿 Service Worker 缓存名比对，
+// 只有「缓存比页面新」才算过期（说明 SW 已更新但页面没重载）。
+// 反过来「缓存比页面旧」是正常的：Unregister 过的旧缓存会残留成孤儿条目。
+async function renderVersion() {
+  const el = $("appVersion");
+  if (!el) return;
+  let swNum = 0;
+  try {
+    const vers = (await caches.keys())
+      .filter((k) => k.startsWith("sonicmint-"))
+      .map((k) => Number(k.replace("sonicmint-v", "")))
+      .filter((n) => !Number.isNaN(n));
+    if (vers.length) swNum = Math.max(...vers);
+  } catch (e) { /* 非安全上下文没有 caches */ }
+  const pageNum = Number(APP_VERSION.replace("v", ""));
+  const stale = swNum > pageNum;
+  el.textContent = stale ? `页面 ${APP_VERSION} · 缓存 v${swNum}（请刷新）` : APP_VERSION;
+  el.style.color = stale ? "var(--accent)" : "";
+}
+
 // ───────── 初始化 ─────────
 window.addEventListener("DOMContentLoaded", () => {
+  renderVersion();
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
@@ -1134,6 +1329,10 @@ window.addEventListener("DOMContentLoaded", () => {
     $("lyricsClose").addEventListener("click", closeLyrics);
     $("lyricsSheet").querySelector("[data-close]").addEventListener("click", closeLyrics);
     $("audio").addEventListener("timeupdate", syncLyrics);
+    // 进度条：跟随时长与位置更新，拖动即跳转
+    $("audio").addEventListener("timeupdate", syncSeek);
+    $("audio").addEventListener("loadedmetadata", syncSeek);
+    bindSeek();
     // 曲库
     $("refreshBtn").addEventListener("click", loadTracks);
     $("searchInput").addEventListener("input", (e) => { searchQuery = e.target.value; renderTracks(); });

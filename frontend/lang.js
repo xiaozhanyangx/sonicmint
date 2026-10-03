@@ -67,6 +67,7 @@ window.I18N = {
     // 播放器按钮
     "player.buy": "购买",
     "player.locked": "未解锁：买断后可播放",
+    "player.ready": "已就绪，点 ▶ 播放",
     // 发行页
     "pub.title": "发行唱片",
     "pub.desc": "把你的音乐永久刻在链上。音频存入 TapeOut 链上容器，永久不可删；版税由智能合约即时结算。",
@@ -117,7 +118,7 @@ window.I18N = {
     "rules.step1.title": "准备素材",
     "rules.step1.desc": "音频文件（MP3/WAV/FLAC/AAC/M4A）、封面图（建议 1:1，≤8.4MB）、曲目名、艺人名。",
     "rules.step2.title": "填写发行信息",
-    "rules.step2.desc": "在首页填写曲目名、艺人名、分类、唱片容器 #ID、处理器编号，上传音频和封面图。可选择性添加多个版税收益方。",
+    "rules.step2.desc": "在首页填写曲目名、艺人名、分类、唱片容器 #ID，上传音频和封面图。可选择性添加多个版税收益方。",
     "rules.step3.title": "上链存储",
     "rules.step3.desc": "点击“上传并注册”。为免逐块弹出钱包确认，前端会先授权一个临时上传密钥（有效期 1 小时），由它在后台把音频、封面、歌词逐块写入你的 TapeOut 容器，传完自动撤销授权并退回剩余 gas。付费曲目会先加密再上传。",
     "rules.step4.title": "上架完成",
@@ -216,6 +217,7 @@ window.I18N = {
     "lib.owned": "Owned",
     "player.buy": "Buy",
     "player.locked": "Locked — buy to play",
+    "player.ready": "Ready — tap ▶ to play",
     "pub.title": "Publish a Record",
     "pub.desc": "Carve your music onto the chain forever. Audio is stored in a TapeOut on-chain container, permanent and undeletable; royalties are settled instantly by smart contract.",
     "pub.trackName": "Track name",
@@ -264,7 +266,7 @@ window.I18N = {
     "rules.step1.title": "Prepare materials",
     "rules.step1.desc": "Audio file (MP3/WAV/FLAC/AAC/M4A), cover image (1:1 recommended, ≤8.4MB), track name and artist name.",
     "rules.step2.title": "Fill in release info",
-    "rules.step2.desc": "Enter track name, artist, genre, record container #ID and processor #, then upload audio and cover. Optionally add multiple royalty recipients.",
+    "rules.step2.desc": "Enter track name, artist, genre and record container #ID, then upload audio and cover. Optionally add multiple royalty recipients.",
     "rules.step3.title": "Store on-chain",
     "rules.step3.desc": "Click “Upload & Register”. To avoid one wallet prompt per chunk, the app first authorizes a temporary upload key (valid for 1 hour); it writes audio, cover and lyrics into your TapeOut container in the background, then the authorization is revoked and leftover gas refunded. Paid tracks are encrypted before upload.",
     "rules.step4.title": "Listed",

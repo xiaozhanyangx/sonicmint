@@ -1,104 +1,93 @@
 # 声刻 SonicMint · 链上音乐发行平台
 
-> 基于 [TapeOut 协议](https://tapeout.link) 的去中心化音乐发行与版税结算平台。
-> 音频永久上链，播放版税即时结算，无服务器、不可篡改。
+> 基于 [TapeOut 协议](https://tapeout.link) 的去中心化音乐发行平台。
+> 音频永久上链，一次买断永久可听，版税即时结算，无服务器。
+
+- **线上站点**：https://music.tapeout.link
+- **密钥管家（keeper）**：https://keeper.tapeout.link
+- **运行链**：X Layer（chainId 196），原生币 OKB
+
+> 想把它推广到写真集、视频、会员卡等品类？见 [DESIGN.md](./DESIGN.md)（系统设计展望，含各类媒体的成本边界）。
 
 ---
 
 ## 目录
 
-- [项目简介](#项目简介)
-- [核心特性](#核心特性)
+- [核心机制](#核心机制)
 - [技术架构](#技术架构)
 - [项目结构](#项目结构)
+- [已部署地址](#已部署地址)
 - [快速开始](#快速开始)
-- [合约部署](#合约部署)
-- [前端发布到 TapeOut](#前端发布到-tapeout)
-- [网络配置](#网络配置)
+- [部署](#部署)
 - [合约 API](#合约-api)
-- [播放与结算规则](#播放与结算规则)
 - [存储规格](#存储规格)
-- [常见问题](#常见问题)
+- [密钥体系（TAP-10）](#密钥体系tap-10)
+- [已知限制](#已知限制)
 
 ---
 
-## 项目简介
+## 核心机制
 
-声刻 SonicMint 让音乐人将唱片直接发行到区块链上：
+### 发行：一次授权，静默写几百块
 
-1. **音频上链** — 音乐文件通过 TapeOut 的 `SiteRegistry` 合约存到链上容器，永久不可删除
-2. **所有权可验证** — 每首歌绑定 Circuit NFT + ERC-6551 Container，归属清晰
-3. **版税即时结算** — 播放付费按预设比例即时分流给艺人、制作人等多方收益方
-4. **全链上无服务器** — 前端、音频、合约逻辑全部运行在链上
+音频不存服务器，逐块写进 TapeOut 的 ERC-6551 容器。瓶颈在于 **每个 24KB 块都是一次独立的合约部署**，一首 6.7MB 的歌约 293 笔交易。
 
-运行在 **X Layer**（OKX 的 zkEVM L2）上。
+直接让钱包逐笔签会弹 293 次确认，所以走 **临时操作员** 机制：
 
----
+1. 前端用 `ethers.Wallet.createRandom()` 生成一个临时密钥（只存内存，刷新即丢）
+2. 你的钱包签 **第 1 笔**：转入预付 gas（按最大费率估算，用不完传完退回）
+3. 你的钱包签 **第 2 笔**：`setOperator(容器, 临时地址, 3600)` 授权 1 小时
+4. 临时密钥直连 RPC，静默签完所有块
+5. 收尾：撤销授权、退回临时密钥剩余余额
+6. 你的钱包签 **最后一笔**：`registerTrack` 把曲目登记上链
 
-## 核心特性
+**293 次点击 → 4 次点击**，总 gas 不变，只是换了签名者。
 
-| 特性 | 说明 |
-|------|------|
-| 曲库搜索 | 按曲目名 / 艺人名实时过滤 |
-| 全部 / 我的切换 | 只看自己发行的曲目 |
-| 播放队列 | 上一曲 / 下一曲，播放结束自动连播 |
-| 播放历史 | 最近播放 5 条记录（localStorage，点击直接播放） |
-| 曲目分享 | 一键分享 / 复制带 track 参数的深链 |
-| 创作者面板 | 版税仪表盘：已发行数、累计版税、待结算播放统计与逐曲明细 |
-| 深色模式 | 跟随系统偏好，手动切换并记忆 |
-| 多语言 | 中文 / English 一键切换并记忆 |
-| PWA | manifest + Service Worker，可安装到主屏幕、离线可用 |
-| 移动端适配 | 汉堡菜单、全宽触摸目标（≥44px）、悬浮播放器 |
+交易发送走流水线：显式递增 nonce 连发、不逐笔等收据、末尾只等最后一笔（nonce 有序，最后一笔落块即前面全部落块）。实测每块从约 4 秒降到约 0.3 秒。
 
-| 🎵 永久唱片 | 音频存于 X Layer，链在数据在 |
-| 💰 即时版税 | 付费播放按比例即时分流，无中间方拖欠 |
-| 👥 多方版税 | 每首歌可配置多个收益方（艺人/制作人/作词/作曲） |
-| 📡 订阅制 | 月费进池子，按播放占比月底分流给艺人 |
-| 🛡️ 抗女巫 | 订阅免费播放需持有 TapeOut Circuit NFT |
-| 🆓 免费唱片 | 可标记为免费，所有人可听（不分钱不计池） |
-| 🎧 无损分片 | 单文件 >8.4MB 自动分片上传，前端合并播放 |
-| 🖼️ 封面图 | 支持上传唱片封面，存链上 |
+### 播放：付费曲目加密上链
+
+- **免费唱片**：明文存链，任何人可播
+- **付费唱片**：上传前用随机内容密钥 K 做 XChaCha20-Poly1305 加密，K 用 keeper 公钥封装成 `sealedCEK` 存合约；歌词用**同一把 K** 加密
+
+买断后播放时，前端从链上 vault 取出属于自己的一份 K 解密。没有 K 只有密文。
+
+### 买断：一次付费，永久可听
+
+无订阅、无月费。`buy(trackId, buyerPubKey)` 付款即入账，收入按「平台抽成 → 版税分配 → 余数归平台」的顺序当场分完，合约不留余额。
+
+买家提交自己的 X25519 公钥，keeper 据此把 K 重新封装成该买家的 vault 写回链上。
+
+### 密钥分发：keeper
+
+keeper 是一个 Cloudflare Worker，唯一职责是 `POST /sync { user, chainId }`：
+
+读链上 `sealedCEK` → 用 keeper 私钥解出 K → 用买家公钥重新封装 → `setVault` 写链。
+
+幂等无状态：vault 完全由链上数据重建，可重复调用；内容一致时不发交易。
 
 ---
 
 ## 技术架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    用户层（前端 DeWEB）                    │
-│  音乐播放器网站（HTML/JS/CSS 存链上，TapeKit Gateway 访问） │
-└──────────────────────┬──────────────────────────────────┘
-                       │ 加载音频 / 交互
-┌──────────────────────▼──────────────────────────────────┐
-│                  资产层（链上存储）                        │
-│  SiteRegistry 记录音频文件路径 + SHA-256 哈希             │
-│  单首歌分片：track_part0.mp3 (8.4MB) / part1.mp3 ...     │
-└──────────────────────┬──────────────────────────────────┘
-                       │ 所有权 / 版税
-┌──────────────────────▼──────────────────────────────────┐
-│                  所有权层（NFT + 账户）                    │
-│  每张唱片 = Circuit NFT + Container（ERC-6551）           │
-│  版税分流规则写入智能合约（艺人/制作人/平台/合作方）        │
-└──────────────────────┬──────────────────────────────────┘
-                       │ 播放计数 / 结算
-┌──────────────────────▼──────────────────────────────────┐
-│                  结算层（SonicMint 合约）                 │
-│  付费播放 → 即时分流                                      │
-│  订阅播放 → 按月按播放占比从订阅池分流                     │
-│  免费播放 → 不计费不分钱                                  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  前端   https://music.tapeout.link                        │
+│  Cloudflare Pages，纯静态 HTML/JS/CSS（无构建）+ PWA        │
+│  ethers v6 本地化 · 加密模块 esbuild 打包为 crypto.js       │
+└───────────────┬──────────────────────────┬───────────────┘
+                │ 读写容器                  │ 请求封装 vault
+┌───────────────▼──────────────┐  ┌────────▼───────────────┐
+│  TapeOut 容器（ERC-6551）      │  │  keeper Worker          │
+│  SiteRegistry 逐块存音频/封面/  │  │  keeper.tapeout.link    │
+│  歌词，路径与哈希上链          │  │  解 sealedCEK → setVault │
+└───────────────┬──────────────┘  └────────┬───────────────┘
+                │                          │
+┌───────────────▼──────────────────────────▼───────────────┐
+│  SonicMint 合约（X Layer）                                 │
+│  曲目登记 · 买断收款 · 版税分流 · sealedCEK / vault 存储    │
+└──────────────────────────────────────────────────────────┘
 ```
-
----
-
-## 技术栈
-
-- **智能合约**：Solidity ^0.8.20
-- **前端**：原生 HTML / CSS / JavaScript（无框架，可直接上链）
-- **钱包交互**：ethers.js v6
-- **链上存储**：TapeOut SiteRegistry（DeWEB）
-- **编译**：solc 0.8.28
-- **支持链**：X Layer (196)
 
 ---
 
@@ -107,272 +96,276 @@
 ```
 tapeout-music/
 ├── contracts/
-│   └── SonicMint.sol           # 核心合约：曲库 + 版税结算 + 订阅制
+│   └── SonicMint.sol          # 核心合约：曲目登记 + 买断 + 版税 + 密钥分发
 ├── frontend/
-│   ├── index.html              # 曲库首页（黑胶唱片 Hero + 播放器）
-│   ├── publish.html            # 发行页面（上传音频/封面/配置版税）
-│   ├── rules.html              # 发行规则说明页
-│   ├── app.js                  # 前端逻辑（钱包/搜索/队列/播放/结算）
-│   ├── lang.js                 # 多语言词典（中/英）与切换逻辑
-│   ├── sw.js                   # Service Worker（PWA 离线缓存）
-│   ├── manifest.json           # PWA 清单（安装到主屏幕）
-│   ├── icon.svg                # PWA 应用图标
-│   ├── style.css               # 样式（浅色/深色主题，参考 tapeout.link 视觉）
-│   └── ethers.min.js           # ethers v6（本地化，支持链上部署）
+│   ├── index.html             # 单页应用：音乐广场 / 发行 / 我的（hash 路由）
+│   ├── publish.html           # 跳转到 index.html#publish
+│   ├── rules.html             # 发行规则说明
+│   ├── app.js                 # 前端逻辑（钱包 / 上传 / 播放 / 买断）
+│   ├── lang.js                # 中英文案与切换
+│   ├── crypto.js              # vendor/tap10 的打包产物（IIFE，全局 TapeCrypto）
+│   ├── style.css              # 样式（浅色 / 深色）
+│   ├── sw.js                  # Service Worker（PWA 离线缓存）
+│   ├── ethers.min.js          # ethers v6（本地化）
+│   └── vendor/tap10/          # TAP-10 密钥派生与载荷（fork 自 TapeKit）
+├── keeper/
+│   ├── src/worker.js          # keeper Worker 源码
+│   ├── dist/worker.js         # 打包产物（部署用）
+│   └── wrangler.toml          # Worker 配置（自定义域名 + 合约地址）
 ├── scripts/
-│   ├── compile.js              # solc 编译 → artifacts/
-│   ├── deploy.js               # 部署合约到链
-│   ├── publish-site.js         # 发布前端到 TapeOut 链上容器
-│   └── upload-audio.js         # CLI 上传单个音频到容器
-├── artifacts/
-│   ├── SonicMint.abi.json      # 合约 ABI
-│   └── SonicMint.bin           # 合约 Bytecode
-└── package.json
+│   ├── compile.js             # solc 编译 → artifacts/
+│   ├── deploy.js              # 部署合约并登记 keeper
+│   ├── keeper-key.js          # 派生 keeper 公钥并回填 app.js
+│   ├── build-crypto.js        # vendor/tap10 → frontend/crypto.js
+│   ├── build-keeper.js        # keeper/src → keeper/dist
+│   ├── upload-audio.js        # CLI：直接上传音频到容器（自用，零点击）
+│   └── publish-site.js        # CLI：把前端发到 TapeOut 容器
+├── artifacts/                 # 编译产物（ABI + bytecode）
+└── TapeKit/                   # TapeOut 协议实现（SPEC 与参考代码）
 ```
+
+---
+
+## 已部署地址
+
+均为 X Layer（196）。
+
+| 名称 | 地址 |
+|---|---|
+| SonicMint（本平台合约） | `0x243000a1BA9058E6A856d5AFAbAE575f9E549130` |
+| SiteRegistry（TapeOut 容器存储） | `0xd6efb7adcc9c83dc4924ad56f6a8e4e969b9adb6` |
+| ContainerOpener（TapeOut 容器开启器） | `0x536add8f30f03b69f6fbf29d425a816a0dc50106` |
+| ProcessorFactory（TapeOut 处理器工厂） | `0x1f09daefa827f02cbb40967cc91b259763760761` |
+| 处理器 #260 | `0x0AbBcbCd6d822C79480fe8abe01952197a399008` |
+| keeper（Worker 签名地址） | `0xE2f67d8AaefDfe8622E8dDDEF6f0D9fcda2db750` |
 
 ---
 
 ## 快速开始
 
-### 环境要求
-
-- Node.js ≥ 18
-- 一个 EVM 钱包（MetaMask / OKX Wallet 等）
-- 钱包中有 OKB 用于支付 Gas
-
-### 安装依赖
+环境要求：Node.js ≥ 18、EVM 钱包、钱包内有 OKB。
 
 ```bash
 npm install
+npm run compile          # 编译合约 → artifacts/
+npx serve frontend       # 本地预览（链上交互需先部署合约）
 ```
-
-### 编译合约
-
-```bash
-npm run compile
-```
-
-输出到 `artifacts/SonicMint.abi.json` 和 `artifacts/SonicMint.bin`。
-
-### 本地预览前端
-
-```bash
-npx serve frontend
-# 打开 http://localhost:3000
-```
-
-> 本地预览可查看 UI，但区块链交互（上传/播放/订阅）需要部署合约后才能使用。
 
 ---
 
-## 合约部署
+## 部署
 
-### 部署到 X Layer
+### 1. 合约
 
 ```bash
-PRIVATE_KEY=0x你的私钥 \
-RPC_URL=https://rpc.xlayer.tech \
-PROCESSOR_FACTORY=0xX Layer 上的 TapeOut ProcessorFactory \
-PLATFORM=0x平台收款地址 \
-PLATFORM_BPS=300 \
-MIN_PLAY_PRICE=0 \
-MONTHLY_FEE=10000000000000000 \
+PRIVATE_KEY=0x... \
+PROCESSOR=0x... \                    # 唯一允许发行的处理器地址（当前 #260）
+PLATFORM=0x... \                     # 平台收款地址，默认取部署者
+PLATFORM_BPS=300 \                   # 平台抽成（基点）
+KEEPER=0x... \                       # 可选：顺带登记 keeper
 npm run deploy
 ```
 
-| 环境变量 | 默认值 | 说明 |
-|---------|--------|------|
-| `PRIVATE_KEY` | 必填 | 部署者私钥 |
-| `PLATFORM` | 部署者地址 | 平台收益收款地址 |
-| `PLATFORM_BPS` | `300` (3%) | 平台抽成比例（基点），每笔收入先行扣除 |
-| `MIN_PLAY_PRICE` | `0` | 单次付费播放最低价（wei） |
-| `MONTHLY_FEE` | `0.01 OKB` | 订阅月费（wei） |
-| `RPC_URL` | X Layer RPC | 可覆盖为其他链 RPC |
-| `PROCESSOR_FACTORY` | 待填 | X Layer 上的 TapeOut ProcessorFactory 地址 |
+### 2. 重部署后的连锁改动
 
-将输出的合约地址填入 `frontend/app.js` 的 `NETWORKS[196].music`，同时填入 X Layer 的核心合约地址（SiteRegistry / ContainerOpener / ProcessorFactory）。
-
----
-
-## 前端发布到 TapeOut
-
-部署完成后，将前端发布到 TapeOut 链上容器，实现全链上无服务器运行。
-
-### 前置条件
-
-1. 拥有一个已开通容器的 TapeOut Circuit（在 [id.tapeout.link](https://id.tapeout.link) 开通，月费 0.08 OKB）
-2. 知道 Circuit 的 `tokenId` 和处理器编号 `cpu`
-
-### 发布
+合约地址是密钥派生的输入（`hub`），**改地址必须走完这 4 步**，否则 keeper 封装出来的 vault 前端解不开：
 
 ```bash
-PRIVATE_KEY=0x你的私钥 \
-TOKEN_ID=4246 \
-CPU=0 \
-npm run publish-site
+# a. 更新 frontend/app.js 的 NETWORKS[196].music 与 keeper/wrangler.toml 的 CONTRACT
+# b. 重算 keeper 公钥并回填 app.js
+KEEPER_PRIVATE_KEY=0x... npm run keeper:key
+# c. 重建并部署 Worker
+npm run build:keeper
+npm run deploy:keeper
+# d. 部署前端
+npm run deploy:web
 ```
 
-发布后访问：`https://{tokenId}-{cpu}.tapekit.org/`
+> 上面是逐条执行。PowerShell 5 不支持 `&&`，要串行写用 `;`。
 
-例如 `tokenId=4246, cpu=0` → `https://4246-0.tapekit.org/`
+### 3. keeper Worker
 
----
-
-## 网络配置
-
-项目运行在 **X Layer** 上，在 `frontend/app.js` 中通过 `NETWORKS` 配置：
-
-```js
-const NETWORKS = {
-  196: {  // X Layer
-    name: "X Layer", symbol: "OKB",
-    rpc: "https://rpc.xlayer.tech",
-    explorer: "https://www.okx.com/web3/explorer/xlayer",
-    siteRegistry:     "0x...",  // TapeOut 官方 X Layer 地址
-    containerOpener:  "0x...",
-    processorFactory: "0x...",
-    music:            "0x...",  // 部署后填入
-  },
-};
+```bash
+# 首次需写入私钥（用 stdin 管道，避免 BOM 污染）
+npx wrangler secret put KEEPER_PRIVATE_KEY --config keeper/wrangler.toml
+npm run deploy:keeper
 ```
 
-### 网络切换
+验证：
 
-- 导航栏有 **X Layer** 切换按钮
-- 点击自动调用钱包 `wallet_switchEthereumChain`
-- 未添加的网络会自动 `wallet_addEthereumChain`
-- 切换后加载 X Layer 上的合约
+```bash
+curl https://keeper.tapeout.link/info
+# {"address":"0x...","publicKey":"0x...","chainId":196,"hub":"0x..."}
+```
 
-### 部署须知
+返回的 `publicKey` 必须与 `frontend/app.js` 里的 `KEEPER.publicKey` 一致。
 
-X Layer 的 TapeOut 核心合约地址（SiteRegistry / ContainerOpener / ProcessorFactory）需要从 TapeOut 官方文档获取，然后填入 `NETWORKS[196]` 与 `scripts/` 中同名常量。
+### 4. 前端
+
+```bash
+npm run deploy:web       # Cloudflare Pages（当前生产）
+```
+
+自定义域名在 Pages 项目里绑定 `music.tapeout.link`；若 zone 与 Pages 同账号，还需手动加一条 CNAME 指向 `sonicmint.pages.dev`（代理开启）。
+
+> 本机部署若报 `Unable to resolve Cloudflare's API hostname`，是 DNS 只返回 IPv6 导致的，加 `NODE_OPTIONS=--dns-result-order=ipv4first` 即可。
+
+改动前端静态资源后要**同步升两处版本号**，否则客户端会一直吃旧缓存：
+
+- `sw.js` 的 `CACHE`（`sonicmint-vNN`）—— 决定 Service Worker 何时换缓存
+- `app.js` 的 `APP_VERSION` —— 显示在侧边栏底部，用来确认页面实际跑的是哪一版
+
+两者不一致时，侧边栏会显示「页面 v50 · 缓存 v52（请刷新）」，提示用户重载。
 
 ---
 
 ## 合约 API
 
-### 核心函数
+### 写入
 
 | 函数 | 说明 |
-|------|------|
-| `registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, title, artistName, free, royalties)` | 注册曲目，返回 trackId |
-| `play(trackId)` payable | 播放曲目（付费/订阅/免费三种模式） |
-| `subscribe()` payable | 订阅（支付月费，有效期 30 天） |
-| `settleTrack(trackId)` | 结算订阅播放版税（从池子按比例分流） |
-| `getTracks(offset, limit)` | 分页查询曲目列表 |
+|---|---|
+| `registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, royalties)` | 登记曲目。校验处理器白名单、容器归属与开启状态；返回 `trackId` |
+| `play(trackId)` | 记录一次播放（不收费）。需免费或已买断 |
+| `buy(trackId, buyerPubKey)` payable | 买断，收入即时分流。加密曲目必传买家 X25519 公钥 |
+| `setVault(user, payload)` | 写入某用户的全量 vault（仅 keeper 或平台） |
+| `setPlatform` / `setPlatformBps` / `setKeeper` / `setAllowedProcessor` | 平台管理（仅平台） |
+
+### 读取
+
+| 函数 | 说明 |
+|---|---|
 | `trackCount()` | 曲目总数 |
-| `subscriptionPool()` | 当前订阅池余额 |
-| `totalPendingPlays()` | 待结算的订阅播放总数 |
-| `isSubscriber(user)` | 查询用户是否在订阅期内 |
-| `monthlyFee()` | 订阅月费 |
-| `minPlayPrice()` | 最低付费播放价 |
+| `getTracks(offset, limit)` | 分页取曲目 |
+| `getTrack(trackId)` / `getTrackRoyalties(trackId)` | 单曲详情与版税配置 |
+| `getPurchased(user, offset, limit)` | 批量查买断状态 |
+| `vaultOf(user)` | 用户的 vault 载荷 |
+| `userPubKey(user)` | 用户登记的 X25519 公钥 |
+| `sealedCEK(trackId)` | 封给 keeper 的内容密钥载荷 |
+| `tracks(trackId)` / `purchased(user, trackId)` | 自动生成的 public 映射 |
 
 ### 数据结构
 
 ```solidity
-struct Track {
-    address artist;          // 主艺人（注册者）
-    address container;       // TapeOut 容器地址
-    uint256 tokenId;         // 电路 #ID
-    uint256 cpu;             // 处理器编号
-    string  audioPath;       // 音频路径
-    uint256 partCount;       // 分片数
-    string  coverPath;       // 封面图路径
+struct TrackMeta {          // registerTrack 的入参
     string  title;
     string  artistName;
-    uint256 playCount;       // 总播放次数
-    uint256 totalEarned;     // 累计版税收入
-    uint256 pendingPlays;    // 待结算播放次数
+    uint8   genre;          // 0..9
+    uint256 price;          // 买断价（wei）；free 时忽略
+    bool    free;
+    bool    encrypted;      // 加密曲目必须付费
+    bytes32 artistPubKey;   // 艺人 X25519 公钥
+    string  lyricsPath;     // 歌词路径，空串 = 无歌词
+}
+
+struct Track {
+    address artist;
+    address container;      // TapeOut 容器地址
+    uint256 tokenId;        // 唱片容器 #ID
+    uint256 cpu;            // 处理器编号
+    string  audioPath;      // partCount > 1 时为 base path
+    uint256 partCount;      // 0/1 = 单文件，>1 = 分片
+    string  coverPath;
+    string  lyricsPath;
+    string  title;
+    string  artistName;
+    uint8   genre;
+    uint256 playCount;
+    uint256 totalEarned;
     uint256 createdAt;
-    bool    free;            // 是否免费唱片
+    uint256 price;
+    bool    free;
+    bool    encrypted;
+    bytes32 artistPubKey;
     bool    exists;
 }
 
-struct RoyaltyRecipient {
-    address addr;   // 收益方地址
-    uint256 bps;    // 分成比例（基点，10000 = 100%）
-}
+struct RoyaltyRecipient { address addr; uint256 bps; }  // 10000 = 100%
 ```
-
-### 安全设计
-
-- **重入保护**：`nonReentrant` 修饰器 + Checks-Effects-Interactions 模式
-- **Gas 限制**：ETH 转账限定 100k gas，防止接收方合约吞噬 gas
-- **即时结算**：`play()` 收到的金额全额即时分流，合约不留余额
-- **参数校验**：版税比例总和 ≤ 100%，地址和路径非空校验
-
----
-
-## 播放与结算规则
-
-### 三种播放模式
-
-| 模式 | 条件 | 结算方式 |
-|------|------|---------|
-| **免费播放** | 曲目标记为 `free` | 不分钱、不计入池子，任何人可听 |
-| **付费播放** | 非订阅用户播放非免费曲目 | 按 `minPlayPrice` 即时分流给收益方 |
-| **订阅播放** | 订阅用户（需持有 Circuit NFT）播放非免费曲目 | 计入 `pendingPlays`，按播放占比从订阅池分流 |
 
 ### 版税分配
 
-- 每笔收入先按 `platformBps` 扣除平台抽成（默认 3%）
-- 剩余部分按曲目的 `royalties` 比例分流给各收益方
-- 取整余数归平台，确保金额全部分出
+`_distributeRoyalties` 的顺序：
 
-### 订阅池结算
+1. 平台抽成 `amount × platformBps / 10000`
+2. 剩余部分按 `trackRoyalties` 的 bps 分配
+3. 取整余数归平台，确保金额全部分出
 
-```
-单曲应得 = 池子余额 × (该曲 pendingPlays / 总 pendingPlays)
-```
+`royalties` 为空数组时默认艺人拿 100%。
 
-任何人都可调用 `settleTrack(trackId)` 触发结算，结算后 `pendingPlays` 清零。
+### 安全设计
+
+- `nonReentrant` + Checks-Effects-Interactions
+- 外部转账限定 100k gas，防接收方合约吞噬
+- 处理器由合约自行从工厂查询，不接受调用方传入，无法绕过白名单
+- 容器地址必须等于 `opener.accountOf(cpuAt(cpu), tokenId)` 且已开启
 
 ---
 
 ## 存储规格
 
-| 项目 | 限制 |
-|------|------|
-| 单文件上限 | 8.4 MB（超过自动分片） |
-| 支持格式 | MP3 / WAV / FLAC / OGG |
-| 封面格式 | JPG / PNG / WebP（建议 1:1） |
-| 存储网络 | X Layer |
-| 访问方式 | `https://{tokenId}-{cpu}.tapekit.org/{path}` |
-| 容器月费 | 0.08 OKB（TapeOut 官方收费） |
+音频、封面、歌词全部存进 TapeOut 容器，路径与 SHA-256 上链。
 
-### 分片机制
+| 项目 | 值 |
+|---|---|
+| 块大小 | 24,000 字节（协议常量 `CHUNK_MAX`） |
+| 单文件上限 | 350 块 = 8,400,000 字节 |
+| 超过 8.4MB | 自动分片为 `.part0` / `.part1`…，`partCount` 记分片数 |
+| 支持音频 | MP3 · WAV · FLAC · AAC/M4A |
+| 支持图片 | JPG · PNG · WebP · GIF |
+| 歌词 | 纯文本或 LRC 时间轴；付费曲目随音频一同加密 |
+| 读取方式 | 浏览器直连 `SiteRegistry.readRange` 取字节（**不要用 `{tokenId}-{cpu}.tapekit.org`**，那个域名只返回引导页，拿不到文件字节） |
+| 容器月费 | 约 0.08 OKB（TapeOut 官方收取） |
 
-- 音频 > 8.4MB 时自动分片为 `.part0`、`.part1`...
-- 播放时前端 `fetch` 所有分片 → `Blob` 合并 → 播放
-- 注册时 `partCount` 记录分片数
+### 路径约定
+
+```
+music/{tokenId}.{cpu}.{ext}          # 音频（单文件）
+music/{tokenId}.{cpu}.part{N}        # 音频（分片）
+music/{tokenId}.{cpu}.cover.{ext}    # 封面
+music/{tokenId}.{cpu}.lrc            # 歌词
+```
+
+### 上传成本
+
+| 项目 | 实测 |
+|---|---|
+| 满块 24KB | 5,501,546 gas |
+| gasPrice | 0.02 gwei |
+| 单块成本 | 约 0.00011 OKB |
+| X Layer 出块 / 区块 gas 上限 | 1 秒 / 210,000,000 |
+
+费用 ≈ `块数 × 0.00011 OKB`，6.7MB 约 0.032 OKB。界面会在选择文件后显示预估。
+
+授权时预转的金额按 `maxFeePerGas` 估算，约为实际花费的 2.5 倍，传完自动退回。
 
 ---
 
-## 常见问题
+## 密钥体系（TAP-10）
 
-**Q: 发行一张唱片需要多少钱？**
+固定密钥域，**改动会让所有已派生的密钥失效**：
 
-A: 主要成本是 Gas 费（存储音频到链上）。一首 3-4 分钟 MP3（约 4MB）在 X Layer 上通常几美分。容器月费 0.08 OKB 由 TapeOut 收取。
+| 参数 | 值 |
+|---|---|
+| `KEY_DOMAIN` | `music.tapeout.link` |
+| `chainId` | 196 |
+| `tokenId` / `cpuIndex` | `1` / `0` |
+| `container` / `holder` | 用户（或 keeper）自身地址 |
+| `hub` | SonicMint 合约地址 |
 
-**Q: 免费唱片艺人怎么赚钱？**
+派生方式：钱包对固定文案签一次名（EIP-191），由签名经 HKDF-SHA256 导出 X25519 密钥对。前端与 keeper 用同一套 `frontend/vendor/tap10/keys.js`，结果确定性一致。
 
-A: 免费唱片用于推广引流，不分钱。艺人可通过付费曲目、订阅池分成等其他曲目赚钱。
+密钥只存内存，不落盘。换账户或换链后立即失效。
 
-**Q: 可以删除已发行的唱片吗？**
+---
 
-A: 不可以。音频存在链上永久不可删。这是"永久唱片"的核心特性。
+## 已知限制
 
-**Q: 如何支持无损音质？**
-
-A: FLAC/WAV 文件超过 8.4MB 时会自动分片上传，播放时前端合并。
-
-**Q: 外部平台如何接入结算？**
-
-A: 外部播放平台只需集成合约的 `play(trackId)` 函数，调用时传入播放费，合约即时按比例分流版税。
-
-**Q: 为什么只支持 X Layer？**
-
-A: 聚焦单链可降低跨链成本与状态同步复杂度。1) 在 X Layer 部署音乐合约；2) 填入 X Layer 核心合约地址到 `NETWORKS[196]`；3) 用户连接钱包后自动识别，未在 X Layer 时可点击导航栏按钮切换。
+- **上传中途关闭页面会锁死预付的 gas**：临时密钥只存内存，页面销毁后无法退回。上传期间有 `beforeunload` 拦截提醒。
+- **流水线的在途交易**：上传中断后已发出的几百笔仍会陆续上链。此时不要立刻重试，否则两个写入方会互相踩 `appendChunk` 的 `expectIndex` 校验。新版结尾有字节数核对，写不完整会明确报错。
+- **单账号发送速率受 RPC 限制**：实测约 3.5 笔/秒，并发与多端点均无收益（RPC 按发送方串行处理）。
+- **只能发行处理器 #260 下的容器**：合约 `allowedProcessor` 限制，需先在 [id.tapeout.link](https://id.tapeout.link) 开通容器。
+- 仅支持 X Layer。
 
 ---
 

@@ -32,6 +32,7 @@
           <span data-i18n="tab.profile">个人</span>
         </a>
       </nav>
+      <div id="appVersion" class="sidebar__version" title="前端版本 · Service Worker 缓存版本"></div>
     </aside>
     <div id="sidebarScrim" class="scrim" data-close hidden></div>
 
@@ -61,7 +62,8 @@
               <div class="vinyl__groove vinyl__groove--2"></div>
               <div class="vinyl__groove vinyl__groove--3"></div>
               <div class="vinyl__label">
-                <div class="vinyl__label-fallback">🎵</div>
+                <img id="libHeroCover" src="" alt="" hidden />
+                <div id="libHeroCoverFallback" class="vinyl__label-fallback">🎵</div>
                 <div class="vinyl__hole"></div>
               </div>
             </div>
@@ -176,6 +178,7 @@
             <label data-i18n="pub.audio">音频文件（支持 MP3 · WAV · FLAC · AAC/M4A）</label>
             <input id="inFile" type="file" accept=".mp3,.wav,.flac,.aac,.m4a,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/flac,audio/x-flac,audio/aac,audio/x-aac,audio/mp4,audio/x-m4a" />
             <span id="fileInfo" class="muted small"></span>
+            <span id="sizeWarn" class="muted small" hidden></span>
           </div>
           <div class="form__row">
             <label data-i18n="pub.cover">封面图（可选，建议 1:1，≤8.4MB）</label>
@@ -292,6 +295,7 @@
         <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/></svg>
       </button>
     </div>
+    <input id="seekBar" class="mini__seek" type="range" min="0" max="1000" step="1" value="0" aria-label="播放进度" />
   </div>
   <audio id="audio"></audio>
 
