@@ -296,6 +296,11 @@
           },
           {
             "internalType": "string",
+            "name": "lyricsPath",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
             "name": "title",
             "type": "string"
           },
@@ -439,6 +444,11 @@
           {
             "internalType": "string",
             "name": "coverPath",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "lyricsPath",
             "type": "string"
           },
           {
@@ -662,6 +672,11 @@
             "internalType": "bytes32",
             "name": "artistPubKey",
             "type": "bytes32"
+          },
+          {
+            "internalType": "string",
+            "name": "lyricsPath",
+            "type": "string"
           }
         ],
         "internalType": "struct SonicMint.TrackMeta",
@@ -876,6 +891,11 @@
       {
         "internalType": "string",
         "name": "coverPath",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "lyricsPath",
         "type": "string"
       },
       {

@@ -21,7 +21,7 @@ function decimal(value, min, name) {
 }
 
 /** 签名文字里的域名。钱包会把它和发起签名的网站比对，不一致就警告（EIP-4361），这是防钓鱼的关键。 */
-export const KEY_DOMAIN = 'sonicmint.pages.dev';
+export const KEY_DOMAIN = 'music.tapeout.link';
 export const KEY_ISSUED_AT = '2026-10-02T00:00:00Z';
 
 /**

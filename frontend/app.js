@@ -14,7 +14,7 @@ const NETWORKS = {
     siteRegistry:     "0xd6efb7adcc9c83dc4924ad56f6a8e4e969b9adb6", // TapeOut 网站注册表（Base / X Layer 同址）
     containerOpener:  "0x536add8f30f03b69f6fbf29d425a816a0dc50106", // TapeOut 容器开启器
     processorFactory: "0x1f09daefa827f02cbb40967cc91b259763760761", // TapeOut 处理器工厂
-    music:            "0xb0750Dc0071e8C889b0f1845936eA68E99a0013E",
+    music:            "0x243000a1BA9058E6A856d5AFAbAE575f9E549130",
   },
 };
 
@@ -25,6 +25,18 @@ const CHUNK_MAX = 24000;
 const FILE_MAX  = 8_400_000;
 const GATEWAY   = "https://{id}-{cpu}.tapekit.org";
 
+// 浏览器对 AAC/M4A 的 MIME 判定不一致，统一按扩展名兜底
+const AUDIO_MIME = {
+  mp3: "audio/mpeg", wav: "audio/wav", flac: "audio/flac",
+  aac: "audio/aac", m4a: "audio/mp4", ogg: "audio/ogg", opus: "audio/ogg",
+};
+const extOf = (name) => String(name).split(".").pop().toLowerCase();
+// 上传：优先用浏览器给的 type，缺失或不对时按扩展名映射
+const uploadMime = (ext, fileType) =>
+  (fileType && fileType.startsWith("audio/") ? fileType : AUDIO_MIME[ext]) || "audio/mpeg";
+// 播放：链上只存路径，按路径扩展名还原；分片路径没有扩展名，退回 audio/mpeg
+const pathMime = (path) => AUDIO_MIME[extOf(path)] || "audio/mpeg";
+
 // 唯一允许发行的处理器编号（须与合约 allowedProcessor 一致）
 const PROCESSOR_NO = 260;
 // 音频分类：索引即合约里的 genre（0..MAX_GENRE），文案见 lang.js 的 genre.N
@@ -32,7 +44,7 @@ const GENRES = ["pop", "rock", "electronic", "hiphop", "folk", "jazz", "classica
 // 平台密钥管家（keeper）：封装/解封曲目内容密钥 K。部署后由 scripts/keeper-key.js 生成并回填
 const KEEPER = {
   address: "0xE2f67d8AaefDfe8622E8dDDEF6f0D9fcda2db750",
-  publicKey: "0x674e24a28533783cd9d3dd25fbd8b56789eff2235d3f4405291e80f7b3e95127", // keeper 的 X25519 公钥
+  publicKey: "0x1bbd22220442da7847773465fe5dc4d3c27a63a176a6148a393645d811b0651c", // keeper 的 X25519 公钥
 };
 // 购买后通知 keeper 封装 vault；走自定义域名（workers.dev 在大陆被 DNS 污染）
 const KEEPER_SYNC = "https://keeper.tapeout.link/sync";
@@ -46,6 +58,7 @@ const CIRCUIT_ABI = [
 const SITE_REGISTRY_ABI = [
   "function putFile(address container, string path, string contentType, bytes32 sha256Hash, bytes firstChunk)",
   "function appendChunk(address container, string path, uint256 expectIndex, bytes chunk)",
+  "function setOperator(address container, address op, uint256 ttl)",
   "function fileInfo(address container, string path) view returns (uint256, string, bytes32, uint256, uint256)",
 ];
 const CONTAINER_OPENER_ABI = [
@@ -56,14 +69,14 @@ const PROCESSOR_FACTORY_ABI = [
   "function cpuAt(uint256 number) view returns (address)",
 ];
 const SONICMINT_ABI = [
-  "function registerTrack(address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, tuple(string title, string artistName, uint8 genre, uint256 price, bool free, bool encrypted, bytes32 artistPubKey) meta, bytes wrappedCEK, tuple(address addr, uint256 bps)[] royalties) returns (uint256)",
+  "function registerTrack(address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, tuple(string title, string artistName, uint8 genre, uint256 price, bool free, bool encrypted, bytes32 artistPubKey, string lyricsPath) meta, bytes wrappedCEK, tuple(address addr, uint256 bps)[] royalties) returns (uint256)",
   "function play(uint256 trackId)",
   "function buy(uint256 trackId, bytes32 buyerPubKey) payable",
   "function trackCount() view returns (uint256)",
   "function vaultOf(address user) view returns (bytes)",
   "function userPubKey(address user) view returns (bytes32)",
   "function getPurchased(address user, uint256 offset, uint256 limit) view returns (bool[])",
-  "function getTracks(uint256 offset, uint256 limit) view returns (tuple(address artist, address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, string title, string artistName, uint8 genre, uint256 playCount, uint256 totalEarned, uint256 createdAt, uint256 price, bool free, bool encrypted, bytes32 artistPubKey, bool exists)[])",
+  "function getTracks(uint256 offset, uint256 limit) view returns (tuple(address artist, address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, string lyricsPath, string title, string artistName, uint8 genre, uint256 playCount, uint256 totalEarned, uint256 createdAt, uint256 price, bool free, bool encrypted, bytes32 artistPubKey, bool exists)[])",
 ];
 
 // ───────── 状态 ─────────
@@ -161,10 +174,10 @@ async function connectWallet() {
     updateNetworkLabels();
     // 换账户/换链后旧密钥失效
     myKeyPair = null; vaultKeys = null;
-    // 若发行页已渲染电路下拉，连接后重新加载
-    if ($("inCircuit")) loadCircuits();
-    if ($("refreshBtn")) loadTracks();
-    else loadCreatorPanel(); // 发行页：只刷新创作者面板
+    // 连接后刷新依赖账户的视图（曲库与发行面板可能同时存在，不能二选一）
+    if ($("refreshBtn")) await loadTracks();
+    if ($("inCircuit")) loadCreatorPanel(false); // 曲库已刷新，这里跳过重复拉取
+    else if (!$("refreshBtn")) loadCreatorPanel();
   } catch (e) {
     console.error(e);
     toast("连接失败：" + e.message, "err");
@@ -289,9 +302,93 @@ function renderRoyaltyList() {
 }
 
 // ───────── 上传音频 ─────────
+// 容器写入逐块部署合约（24KB/块），若用钱包逐笔签会弹出几百次。
+// 这里改走 TapeOut 的操作员机制：钱包签 1 笔 setOperator 后，
+// 由内存里的临时密钥静默签完所有块，上传结束再撤销。
+const OP_TTL = 3600;                  // 临时授权时长（秒）
+const OP_GAS_LIMIT = 7_000_000n;      // 单块固定 gas 上限（实测满块 24KB 约 5.5M）
+const OP_REFUND_RESERVE = 30_000n;    // 退回余额时留给临时密钥自身的 gas
+const GAS_PER_CHUNK = 5_600_000n;     // 预估算力用的单块耗量
+const FALLBACK_GAS_PRICE = 20_000_001n; // 未连钱包时的兜底 gas 价（X Layer 实测值）
+const KEEP_OPEN = "，请勿关闭窗口…";   // 逐块写入期间离开页面会中断上传
+let pendingOp = null;                 // { burner, container }：中断时供手动撤销
+let uploading = false;                // 上传进行中：拦截关闭/刷新
+
+// 授权临时密钥写容器并注入 gas，返回可静默签名的 registry 实例
+// 注资按最大费率预付，实际用量约一半，差额在 closeOperator 里退回
+async function openOperator(container, chunkCount, onStatus) {
+  const burner = ethers.Wallet.createRandom(); // 仅存内存，刷新即丢
+  // 先登记，后续任一步失败都能在失败分支里把余额退回
+  pendingOp = { burner, container, authorized: false };
+  syncRevokeBtn();
+
+  const fee = await provider.getFeeData();
+  const fund = OP_GAS_LIMIT * BigInt(chunkCount + 8) * (fee.maxFeePerGas || fee.gasPrice);
+
+  onStatus(`第 1 步：转入约 ${Number(ethers.formatEther(fund)).toFixed(4)} OKB 作为 gas（用不完传完退回）…`);
+  await (await signer.sendTransaction({ to: burner.address, value: fund })).wait();
+
+  onStatus(`第 2 步：授权临时上传密钥（有效期 ${Math.round(OP_TTL / 60)} 分钟）…`);
+  await (await registryContract.setOperator(container, burner.address, OP_TTL)).wait();
+  pendingOp.authorized = true;
+
+  return new ethers.Contract(currentNetwork.siteRegistry, SITE_REGISTRY_ABI, burner.connect(provider));
+}
+
+// 收尾：撤销授权（ttl 传 0 即立即过期），并把没花完的 gas 退回；密钥随即丢弃
+// authorized 为假时跳过撤销——授权压根没成功，不必多弹一笔钱包确认
+async function closeOperator() {
+  if (!pendingOp) return;
+  const { burner, container, authorized } = pendingOp;
+  if (authorized) {
+    await (await registryContract.setOperator(container, burner.address, 0)).wait();
+  }
+  const bal = await provider.getBalance(burner.address);
+  const fee = await provider.getFeeData();
+  const reserve = OP_REFUND_RESERVE * (fee.maxFeePerGas || fee.gasPrice);
+  if (bal > reserve) {
+    await (await burner.sendTransaction({ to: account, value: bal - reserve })).wait();
+  }
+  pendingOp = null;
+  syncRevokeBtn();
+}
+
+function syncRevokeBtn() {
+  const btn = $("revokeOpBtn");
+  if (btn) btn.hidden = !pendingOp;
+}
+
+// ─── 文件信息与 gas 预估（音频 + 封面合计）───
+async function gasPriceNow() {
+  if (!provider) return FALLBACK_GAS_PRICE;
+  try { return (await provider.getFeeData()).gasPrice || FALLBACK_GAS_PRICE; }
+  catch (e) { return FALLBACK_GAS_PRICE; }
+}
+
+async function renderFileInfo() {
+  const audio = $("inFile") && $("inFile").files[0];
+  const cover = $("inCover") && $("inCover").files[0];
+  const aInfo = $("fileInfo"), cInfo = $("coverInfo");
+
+  if (aInfo) {
+    if (!audio) aInfo.textContent = "";
+    else {
+      const mb = (audio.size / 1024 / 1024).toFixed(2);
+      const parts = Math.ceil(audio.size / FILE_MAX);
+      const chunks = Math.ceil(audio.size / CHUNK_MAX) + (cover ? Math.ceil(cover.size / CHUNK_MAX) : 0);
+      const okb = Number(ethers.formatEther(GAS_PER_CHUNK * BigInt(chunks) * (await gasPriceNow()))).toFixed(4);
+      aInfo.textContent = `${audio.name} · ${mb} MB${parts > 1 ? ` · 将分 ${parts} 片上传` : ""} · ${chunks} 块 · 预计 gas ≈ ${okb} OKB`;
+    }
+  }
+  if (cInfo) {
+    cInfo.textContent = cover ? `${cover.name} · ${(cover.size / 1024 / 1024).toFixed(2)} MB` : "";
+  }
+}
+
 // 成功后清空表单，恢复按钮
 function resetUploadForm() {
   $("inTitle").value = ""; $("inArtist").value = ""; $("inFile").value = ""; $("inCover").value = "";
+  if ($("inLyrics")) $("inLyrics").value = "";
   if ($("inGenre")) $("inGenre").value = "0";
   if ($("inPrice")) $("inPrice").value = "";
   $("fileInfo").textContent = ""; $("coverInfo").textContent = "";
@@ -325,6 +422,7 @@ async function uploadAudio() {
   const encrypted = !isFree; // 付费曲目一律加密上链
 
   $("uploadBtn").disabled = true;
+  uploading = true;
   status.style.color = "";
 
   try {
@@ -332,50 +430,76 @@ async function uploadAudio() {
     const processor = await factoryContract.cpuAt(cpu);
     const container = await openerContract.accountOf(processor, tokenId);
     if (!(await openerContract.isOpened(processor, tokenId)))
-      throw new Error("该电路未开通容器，请先去 id.tapeout.link 开通");
+      throw new Error("该唱片容器未开通，请先去 id.tapeout.link 开通");
 
     const basePath = `music/${tokenId}.${cpu}`;
-
-    // ─── 上传封面图 ───
-    let coverPath = "";
-    if (coverFile) {
-      status.textContent = "上传封面图…";
-      const coverBuf = new Uint8Array(await coverFile.arrayBuffer());
-      const ext = coverFile.name.split(".").pop() || "jpg";
-      coverPath = `${basePath}.cover.${ext}`;
-      const coverHash = await sha256Bytes(coverBuf);
-      const coverChunks = Math.ceil(coverBuf.length / CHUNK_MAX);
-      await registryContract.putFile(container, coverPath, coverFile.type, coverHash, coverBuf.slice(0, CHUNK_MAX));
-      await new Promise(r => setTimeout(r, 2000));
-      for (let i = 1; i < coverChunks; i++) {
-        const s = i * CHUNK_MAX;
-        await registryContract.appendChunk(container, coverPath, i, coverBuf.slice(s, s + CHUNK_MAX));
-      }
-    }
+    const coverBuf = coverFile ? new Uint8Array(await coverFile.arrayBuffer()) : null;
 
     // ─── 加密音频（付费曲目）：随机 K 加密，K 封给 keeper 后上链 ───
     let buf = new Uint8Array(await file.arrayBuffer());
     let wrappedCEK = "0x";
     let artistPubKey = ethers.ZeroHash;
+    let cek = null; // 内容密钥 K，歌词复用同一把
     if (encrypted) {
       status.textContent = "生成内容密钥…";
       const lib = cryptoLib();
       const kp = await ensureKeyPair();
       const cfg = { hub: currentNetwork.music, chainId: currentChainId };
-      const key = lib.randomKey();
-      buf = lib.encryptBytes(key, buf);
+      cek = lib.randomKey();
+      buf = lib.encryptBytes(cek, buf);
       artistPubKey = lib.pubKeyHex(kp.publicKey);
-      wrappedCEK = lib.bytesToHex(lib.wrapKeyFor(key, {
+      wrappedCEK = lib.bytesToHex(lib.wrapKeyFor(cek, {
         address: KEEPER.address,
         publicKey: lib.pubKeyBytes(KEEPER.publicKey),
       }, cfg));
     }
 
-    // ─── 上传音频（分片）───
+    // ─── 歌词：付费曲目与音频共用内容密钥 K ───
+    const lyricsText = $("inLyrics") ? $("inLyrics").value.trim() : "";
+    let lbuf = lyricsText ? new TextEncoder().encode(lyricsText) : null;
+    if (lbuf && encrypted) lbuf = cryptoLib().encryptBytes(cek, lbuf);
+
     const partSize = FILE_MAX;
     const partCount = Math.ceil(buf.length / partSize);
-    const ext = file.name.split(".").pop() || "mp3";
+    const ext = extOf(file.name) || "mp3";
+    const mime = uploadMime(ext, file.type);
 
+    // ─── 授权临时密钥，之后所有容器写入免钱包确认 ───
+    const estChunks = Math.ceil(((coverBuf ? coverBuf.length : 0) + buf.length + (lbuf ? lbuf.length : 0)) / CHUNK_MAX) + partCount;
+    const writer = await openOperator(container, estChunks, (msg) => { status.textContent = msg; });
+
+    // 连续发、末尾统一等：不再逐笔等收据（逐笔 wait 要等轮询周期，实测每笔约 4s）。
+    // 显式递增 nonce 保证上链顺序满足 appendChunk 的 expectIndex 校验；
+    // 也正因此不能逐笔 estimateGas（前序未上链时模拟必然失败），统一用固定 gasLimit。
+    // 手续费一次取好随每笔带上，避免逐笔再查。并发发送实测无收益（RPC 按发送方串行），故保持串行。
+    const txs = [];
+    const fee = await provider.getFeeData();
+    let nonce = await provider.getTransactionCount(pendingOp.burner.address, "pending");
+    const next = () => ({
+      nonce: nonce++,
+      gasLimit: OP_GAS_LIMIT,
+      maxFeePerGas: fee.maxFeePerGas,
+      maxPriorityFeePerGas: fee.maxPriorityFeePerGas,
+    });
+    const written = []; // [{path, size}]，落块后逐个核对字节数
+
+    // ─── 上传封面图 ───
+    let coverPath = "";
+    if (coverBuf) {
+      status.textContent = "上传封面图" + KEEP_OPEN;
+      const coverExt = coverFile.name.split(".").pop() || "jpg";
+      coverPath = `${basePath}.cover.${coverExt}`;
+      const coverHash = await sha256Bytes(coverBuf);
+      const coverChunks = Math.ceil(coverBuf.length / CHUNK_MAX);
+      txs.push(await writer.putFile(container, coverPath, coverFile.type, coverHash, coverBuf.slice(0, CHUNK_MAX), next()));
+      for (let i = 1; i < coverChunks; i++) {
+        const s = i * CHUNK_MAX;
+        txs.push(await writer.appendChunk(container, coverPath, i, coverBuf.slice(s, s + CHUNK_MAX), next()));
+      }
+      written.push({ path: coverPath, size: coverBuf.length });
+    }
+
+    // ─── 上传音频（分片）───
     for (let p = 0; p < partCount; p++) {
       const start = p * partSize;
       const partBuf = buf.slice(start, start + partSize);
@@ -383,29 +507,57 @@ async function uploadAudio() {
       const hash = await sha256Bytes(partBuf);
       const totalChunks = Math.ceil(partBuf.length / CHUNK_MAX);
 
-      status.textContent = `上传音频 ${p + 1}/${partCount} (1/${totalChunks})…`;
-      const tx1 = await registryContract.putFile(container, path, "audio/mpeg", hash, partBuf.slice(0, CHUNK_MAX));
-      await tx1.wait();
-
+      status.textContent = `上传音频 ${p + 1}/${partCount} (1/${totalChunks}) · 免确认` + KEEP_OPEN;
+      txs.push(await writer.putFile(container, path, mime, hash, partBuf.slice(0, CHUNK_MAX), next()));
       for (let i = 1; i < totalChunks; i++) {
         const s = i * CHUNK_MAX;
-        const tx = await registryContract.appendChunk(container, path, i, partBuf.slice(s, s + CHUNK_MAX));
-        await tx.wait();
-        status.textContent = `上传音频 ${p + 1}/${partCount} (${i + 1}/${totalChunks})…`;
+        txs.push(await writer.appendChunk(container, path, i, partBuf.slice(s, s + CHUNK_MAX), next()));
+        if (i % 10 === 0 || i === totalChunks - 1) {
+          status.textContent = `上传音频 ${p + 1}/${partCount} (${i + 1}/${totalChunks}) · 免确认` + KEEP_OPEN;
+        }
       }
+      written.push({ path, size: partBuf.length });
     }
+
+    // ─── 上传歌词 ───
+    let lyricsPath = "";
+    if (lbuf) {
+      status.textContent = "上传歌词" + KEEP_OPEN;
+      lyricsPath = `${basePath}.lrc`;
+      const lHash = await sha256Bytes(lbuf);
+      txs.push(await writer.putFile(container, lyricsPath, "text/plain", lHash, lbuf.slice(0, CHUNK_MAX), next()));
+      for (let i = 1; i * CHUNK_MAX < lbuf.length; i++) {
+        const s = i * CHUNK_MAX;
+        txs.push(await writer.appendChunk(container, lyricsPath, i, lbuf.slice(s, s + CHUNK_MAX), next()));
+      }
+      written.push({ path: lyricsPath, size: lbuf.length });
+    }
+
+    // ─── 等最后一笔落块（nonce 有序，最后一笔落块即前面全部落块）───
+    status.textContent = `等待 ${txs.length} 块写入完成` + KEEP_OPEN;
+    await txs[txs.length - 1].wait();
+
+    // 核对字节数，避免个别块失败被静默吞掉
+    for (const w of written) {
+      const info = await registryContract.fileInfo(container, w.path);
+      if (Number(info[0]) !== w.size) throw new Error(`写入不完整：${w.path}（${info[0]}/${w.size} 字节）`);
+    }
+
+    // ─── 上传完毕，撤销临时授权并退回剩余 gas ───
+    status.textContent = "撤销临时授权，退回剩余 gas…";
+    await closeOperator();
 
     // 注册曲目
     status.textContent = "注册曲目…";
     const royalties = royaltyRecipients.map((r) => ({ addr: r.addr, bps: r.bps }));
     const audioPath = partCount > 1 ? basePath : `${basePath}.${ext}`;
-    const meta = { title, artistName: artist, genre, price: priceWei, free: isFree, encrypted, artistPubKey };
+    const meta = { title, artistName: artist, genre, price: priceWei, free: isFree, encrypted, artistPubKey, lyricsPath };
     const tx = await musicContract.registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, royalties);
     const rc = await tx.wait();
     const evt = rc.logs.find((l) => l.fragment && l.fragment.name === "TrackRegistered");
     const trackId = evt ? evt.args[0].toString() : "?";
 
-    status.textContent = `✓ 发行成功！曲目 #${trackId}${partCount > 1 ? `（${partCount} 分片）` : ""}${encrypted ? " · 已加密" : ""}${coverPath ? " · 含封面" : ""}`;
+    status.textContent = `✓ 发行成功！曲目 #${trackId}${partCount > 1 ? `（${partCount} 分片）` : ""}${encrypted ? " · 已加密" : ""}${coverPath ? " · 含封面" : ""}${lyricsPath ? " · 含歌词" : ""}`;
     status.style.color = "var(--accent)";
 
     resetUploadForm();
@@ -414,9 +566,22 @@ async function uploadAudio() {
     console.error(e);
     status.textContent = "✗ " + (e.reason || e.message);
     status.style.color = "var(--danger)";
+    toast("发行失败：" + (e.reason || e.message), "err"); // 切到其他菜单时也要能看到
+    // 失败也要把临时密钥里的 gas 退回，否则密钥一丢余额就永久锁死
+    try { await closeOperator(); } catch (e2) { console.warn("refund failed", e2); }
     $("uploadBtn").disabled = false;
+    syncRevokeBtn(); // 退款没成功时授权仍在，提示用户可手动撤销
+  } finally {
+    uploading = false;
   }
 }
+
+// 逐块写入期间关闭/刷新会中断上传，交给浏览器弹确认框
+window.addEventListener("beforeunload", (e) => {
+  if (!uploading) return;
+  e.preventDefault();
+  e.returnValue = ""; // 旧浏览器要靠它触发提示，文案由浏览器决定
+});
 
 // ───────── 曲库 ─────────
 // 拉取曲目与权限缓存（不渲染），曲库页与创作者面板共用
@@ -450,10 +615,10 @@ async function loadTracks() {
   }
 }
 
-// 创作者面板：发行页无曲库列表，单独拉数据
-async function loadCreatorPanel() {
+// 创作者面板：发行页无曲库列表，单独拉数据（refetch=false 表示曲目数据已是最新）
+async function loadCreatorPanel(refetch = true) {
   if (!musicContract) { updateCreatorPanel(); loadCircuits(); return; }
-  try { await fetchTracks(); } catch (e) { console.error(e); }
+  if (refetch) { try { await fetchTracks(); } catch (e) { console.error(e); } }
   updateCreatorPanel();
   loadCircuits();
 }
@@ -549,6 +714,8 @@ function switchTab() {
   document.querySelectorAll(".side-item").forEach((t) => t.classList.toggle("is-active", t.dataset.tab === name));
   const load = TAB_LOADERS[name];
   if (load) load();
+  // 上传不因切菜单而中断，只是进度看不见，提示一句
+  if (uploading && name !== "publish") toast("上传仍在进行，回到「发行」可查看进度");
 }
 
 // ───────── 个人面板：我购买的音乐 ─────────
@@ -662,6 +829,8 @@ async function playTrack(idx) {
   if (!canPlay(idx)) { toast(account ? T("player.locked") : "请先连接钱包", "err"); return; }
 
   currentTrackIdx = idx;
+  lyricsLines = []; // 换曲后旧歌词作废，等用户重新打开歌词面板
+  activeLyric = -1;
   markPlaying();
   fillMini(t);
 
@@ -679,7 +848,7 @@ async function playTrack(idx) {
         if (!keyHex) throw new Error("密钥尚未就绪，请稍后重试");
         bytes = cryptoLib().decryptBytes(cryptoLib().hexToBytes(keyHex, 32), bytes);
       }
-      audio.src = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+      audio.src = URL.createObjectURL(new Blob([bytes], { type: pathMime(t.audioPath) }));
     } else {
       audio.src = fileUrl(t, t.audioPath);
     }
@@ -690,6 +859,88 @@ async function playTrack(idx) {
     markPlaying();
   }
   renderQueue();
+}
+
+// ───────── 歌词（LRC 时间轴 / 纯文本）─────────
+let lyricsLines = []; // [{ t: 起始秒, text }]，纯文本时 t = -1
+let activeLyric = -1;
+
+// 整段含 [mm:ss.xx] 则按 LRC 解析，否则逐行纯文本
+function parseLyrics(text) {
+  const lines = text.split(/\r?\n/);
+  if (!lines.some((l) => /\[\d+:\d+(?:\.\d+)?\]/.test(l))) {
+    return lines.map((l) => ({ t: -1, text: l.trim() })).filter((l) => l.text);
+  }
+  const out = [];
+  for (const raw of lines) {
+    const body = raw.replace(/\[[^\]]*\]/g, "").trim();
+    if (!body) continue; // 纯元信息行（[ti:] / [ar:] 等）
+    for (const m of raw.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)) {
+      out.push({ t: Number(m[1]) * 60 + Number(m[2]), text: body });
+    }
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+function renderLyrics() {
+  const list = $("lyricsList");
+  if (!list) return;
+  activeLyric = -1;
+  list.innerHTML = lyricsLines.length
+    ? lyricsLines.map((l) => `<div class="lyrics-line">${escapeHtml(l.text)}</div>`).join("")
+    : `<p class="muted">${T("lyrics.none")}</p>`;
+}
+
+// 按播放进度高亮当前行并居中
+function syncLyrics() {
+  const list = $("lyricsList"), sheet = $("lyricsSheet");
+  if (!list || !sheet || sheet.hidden || !lyricsLines.length) return;
+  const cur = $("audio").currentTime;
+  let idx = -1;
+  for (let i = 0; i < lyricsLines.length; i++) {
+    if (lyricsLines[i].t < 0) continue;
+    if (lyricsLines[i].t <= cur) idx = i;
+    else break;
+  }
+  if (idx === activeLyric) return;
+  activeLyric = idx;
+  list.querySelectorAll(".lyrics-line").forEach((el, i) => el.classList.toggle("is-active", i === idx));
+  const el = list.children[idx];
+  if (el) list.scrollTop = el.offsetTop - list.clientHeight / 2 + el.clientHeight / 2;
+}
+
+function closeLyrics() { const s = $("lyricsSheet"); if (s) s.hidden = true; }
+
+async function openLyrics() {
+  const sheet = $("lyricsSheet"), list = $("lyricsList");
+  if (!sheet || !list) return;
+  if (currentTrackIdx == null) { toast(T("lyrics.noTrack"), "err"); return; }
+  sheet.hidden = false;
+  lyricsLines = [];
+  activeLyric = -1;
+  list.innerHTML = `<p class="muted">${T("lyrics.loading")}</p>`;
+
+  const t = tracksCache[currentTrackIdx];
+  if (!t || !t.lyricsPath) { renderLyrics(); return; }
+  if (!canPlay(currentTrackIdx)) { list.innerHTML = `<p class="muted">${T("lyrics.locked")}</p>`; return; }
+  try {
+    const res = await fetch(fileUrl(t, t.lyricsPath));
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    let bytes = new Uint8Array(await res.arrayBuffer());
+    if (t.encrypted) {
+      // 歌词与音频共用同一把 K，来自链上 vault
+      const keyHex = await vaultKeyFor(currentTrackIdx);
+      if (!keyHex) throw new Error(T("lyrics.noKey"));
+      bytes = cryptoLib().decryptBytes(cryptoLib().hexToBytes(keyHex, 32), bytes);
+    }
+    lyricsLines = parseLyrics(new TextDecoder().decode(bytes));
+    renderLyrics();
+    syncLyrics();
+  } catch (e) {
+    lyricsLines = [];
+    console.warn("lyrics failed", e);
+    list.innerHTML = `<p class="muted">${T("lyrics.fail")}</p>`;
+  }
 }
 
 // ───────── 买断 ─────────
@@ -777,7 +1028,7 @@ function updateCreatorPanel() {
   }).join("");
 }
 
-// ───────── 电路下拉：枚举当前钱包在指定处理器下持有的电路 ─────────
+// ───────── 唱片容器下拉：枚举当前钱包在指定处理器下持有的容器 ─────────
 async function loadCircuits() {
   const sel = $("inCircuit"), info = $("circuitInfo");
   if (!sel) return;
@@ -808,7 +1059,7 @@ async function loadCircuits() {
       // 保持可点击（禁用会让用户以为点了没反应），把原因写在提示里
       sel.disabled = false;
       sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;
-      info.textContent = `处理器 #${PROCESSOR_NO} 下未找到 ${shortAddr(account)} 持有的电路`;
+      info.textContent = `处理器 #${PROCESSOR_NO} 下未找到 ${shortAddr(account)} 持有的唱片容器`;
       info.style.color = "var(--danger)";
       return;
     }
@@ -819,12 +1070,12 @@ async function loadCircuits() {
   } catch (e) {
     sel.disabled = false;
     sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;
-    info.textContent = "加载电路失败：" + (e.reason || e.message);
+    info.textContent = "加载唱片容器失败：" + (e.reason || e.message);
     info.style.color = "var(--danger)";
   }
 }
 
-// 选中电路的容器状态提示
+// 选中唱片容器的状态提示
 function syncCircuitInfo() {
   const sel = $("inCircuit"), info = $("circuitInfo");
   if (!sel || !info) return;
@@ -878,6 +1129,11 @@ window.addEventListener("DOMContentLoaded", () => {
     $("mySongsBtn").addEventListener("click", openQueue);
     $("queueClose").addEventListener("click", closeQueue);
     $("queue").querySelector("[data-close]").addEventListener("click", closeQueue);
+    // 歌词抽屉：高亮行随播放进度滚动
+    $("lyricsBtn").addEventListener("click", openLyrics);
+    $("lyricsClose").addEventListener("click", closeLyrics);
+    $("lyricsSheet").querySelector("[data-close]").addEventListener("click", closeLyrics);
+    $("audio").addEventListener("timeupdate", syncLyrics);
     // 曲库
     $("refreshBtn").addEventListener("click", loadTracks);
     $("searchInput").addEventListener("input", (e) => { searchQuery = e.target.value; renderTracks(); });
@@ -899,30 +1155,32 @@ window.addEventListener("DOMContentLoaded", () => {
         inFree.addEventListener("change", syncPrice);
         syncPrice();
       }
-      // 电路下拉：切换时刷新容器状态提示
+      // 唱片容器下拉：切换时刷新开通状态提示
       const circuitSel = $("inCircuit");
       if (circuitSel) circuitSel.addEventListener("change", syncCircuitInfo);
+      // 上传中断后临时授权仍在，提供手动撤销
+      const revokeBtn = $("revokeOpBtn");
+      if (revokeBtn) revokeBtn.addEventListener("click", async () => {
+        revokeBtn.disabled = true;
+        try {
+          await closeOperator();
+          toast("已撤销临时上传授权，剩余 gas 已退回", "ok");
+        } catch (e) {
+          toast("撤销失败：" + (e.reason || e.message), "err");
+        } finally {
+          revokeBtn.disabled = false;
+        }
+      });
       $("addRoyaltyBtn").addEventListener("click", () => {
         royaltyRecipients.push({ addr: "", bps: 0 });
         renderRoyaltyList();
       });
       $("inFile").addEventListener("change", (e) => {
-        const f = e.target.files[0];
-        const info = $("fileInfo");
-        uploadBtn.disabled = !f;
-        if (f) {
-          const mb = (f.size / 1024 / 1024).toFixed(2);
-          const parts = Math.ceil(f.size / FILE_MAX);
-          info.textContent = `${f.name} · ${mb} MB${parts > 1 ? ` · 将分 ${parts} 片上传` : ""}`;
-        } else info.textContent = "";
+        uploadBtn.disabled = !e.target.files[0];
+        renderFileInfo(); // 音频行带「音频 + 封面」合计 gas 预估
       });
       const coverInput = $("inCover");
-      if (coverInput) coverInput.addEventListener("change", (e) => {
-        const f = e.target.files[0];
-        const info = $("coverInfo");
-        if (f) { const mb = (f.size / 1024 / 1024).toFixed(2); info.textContent = `${f.name} · ${mb} MB`; }
-        else info.textContent = "";
-      });
+      if (coverInput) coverInput.addEventListener("change", () => renderFileInfo());
     }
 
     // 首屏：拉曲库 → 按 hash 定位面板

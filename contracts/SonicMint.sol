@@ -13,6 +13,7 @@ pragma solidity ^0.8.20;
  *           6. 无损分片：单文件超 8.4MB 可分片上传，前端合并播放
  *           7. 平台抽成：每笔收入先按 platformBps 扣除，余下按版税比例分给收益方
  *           8. 处理器白名单：仅指定处理器的电路可发行唱片，并校验容器归属与开启状态
+ *           9. 歌词：与封面同构存于容器，路径上链；付费曲目的歌词与音频共用同一个 K 加密
  *
  * 加密流程（TAP-10 载荷，X25519 + XChaCha20-Poly1305）：
  *   - 艺人上传前生成随机 K，用 K 加密音频；K 封给 keeper 公钥后上链，存于 sealedCEK[trackId]
@@ -49,6 +50,7 @@ contract SonicMint {
         bool    free;         // 免费唱片
         bool    encrypted;    // 是否加密上链（加密曲目必须付费）
         bytes32 artistPubKey; // 艺人的 X25519 公钥，供 keeper 封装时参考
+        string  lyricsPath;   // 歌词路径；付费曲目的歌词与音频用同一个 K 加密
     }
 
     struct Track {
@@ -59,6 +61,7 @@ contract SonicMint {
         string  audioPath;       // 音频路径；partCount>1 时为 base path，文件为 path.part0, .part1...
         uint256 partCount;       // 分片数：0/1 = 单文件；>1 = 分片
         string  coverPath;       // 封面图路径
+        string  lyricsPath;      // 歌词路径（LRC 或纯文本）；空串 = 无歌词
         string  title;
         string  artistName;
         uint8   genre;
@@ -171,6 +174,7 @@ contract SonicMint {
      * @param container 容器地址，须等于 opener.accountOf(cpuAt(cpu), tokenId)，且该容器已开启
      * @param cpu       处理器编号，须指向 allowedProcessor（未设白名单时不限）
      * @param meta      元信息；meta.encrypted 为真时须同时给出 artistPubKey 与 wrappedCEK
+     *                  meta.lyricsPath 为歌词文件路径，空串表示无歌词（付费曲目须与音频一同加密）
      * @param wrappedCEK 内容密钥封给 keeper 的载荷；未加密时留空
      * @param royalties 收益方列表，bps 相对「扣除平台抽成后」的金额计算，总和须 ≤ 10000；若为空则艺人拿 100%
      * @param partCount 分片数，0 或 1 表示单文件
@@ -224,6 +228,7 @@ contract SonicMint {
             audioPath: audioPath,
             partCount: partCount,
             coverPath: coverPath,
+            lyricsPath: meta.lyricsPath,
             title: meta.title,
             artistName: meta.artistName,
             genre: meta.genre,

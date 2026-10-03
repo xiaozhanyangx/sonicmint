@@ -153,9 +153,9 @@
             <input id="inArtist" type="text" placeholder="你的名字或艺名" data-i18n-ph="pub.artistPh" />
           </div>
           <div class="form__row">
-            <label data-i18n="pub.circuit">电路</label>
+            <label data-i18n="pub.circuit">唱片容器</label>
             <select id="inCircuit"></select>
-            <span id="circuitInfo" class="muted small" data-i18n="pub.circuitHint">仅列出处理器 #260 下你持有的电路；容器未开通的需先去 id.tapeout.link 开通。</span>
+            <span id="circuitInfo" class="muted small" data-i18n="pub.circuitHint">仅列出处理器 #260 下你持有的唱片容器；未开通的需先去 id.tapeout.link 开通。</span>
           </div>
           <div class="form__row">
             <label data-i18n="pub.genre">分类</label>
@@ -173,14 +173,20 @@
             </select>
           </div>
           <div class="form__row">
-            <label data-i18n="pub.audio">音频文件</label>
-            <input id="inFile" type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/flac" />
+            <label data-i18n="pub.audio">音频文件（支持 MP3 · WAV · FLAC · AAC/M4A）</label>
+            <input id="inFile" type="file" accept=".mp3,.wav,.flac,.aac,.m4a,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/flac,audio/x-flac,audio/aac,audio/x-aac,audio/mp4,audio/x-m4a" />
             <span id="fileInfo" class="muted small"></span>
           </div>
           <div class="form__row">
             <label data-i18n="pub.cover">封面图（可选，建议 1:1，≤8.4MB）</label>
             <input id="inCover" type="file" accept="image/*" />
             <span id="coverInfo" class="muted small"></span>
+          </div>
+
+          <div class="form__row">
+            <label data-i18n="pub.lyrics">歌词（可选，支持 LRC 时间轴）</label>
+            <textarea id="inLyrics" rows="6" placeholder="[00:12.00]第一句歌词&#10;[00:15.30]第二句歌词&#10;（无时间轴则按纯文本显示）" data-i18n-ph="pub.lyricsPh"></textarea>
+            <span id="lyricsInfo" class="muted small" data-i18n="pub.lyricsHint">付费曲目的歌词会用与音频相同的内容密钥加密，仅购买者可查看。</span>
           </div>
 
           <div class="form__row">
@@ -208,12 +214,13 @@
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
               <span data-i18n="rules.title">发行规则</span>
             </a>
+            <button id="revokeOpBtn" class="btn btn--ghost small-btn" data-i18n="pub.revokeOp" hidden>撤销临时上传授权</button>
             <span id="uploadStatus" class="muted small"></span>
           </div>
         </div>
 
         <div class="callout" data-i18n-html="pub.tip">
-          <strong>提示：</strong>上传需消耗 X Layer 的 Gas（OKB）。发行前请确保电路已在对应链上开通容器（<a href="https://id.tapeout.link" target="_blank">id.tapeout.link</a>），并阅读 <a href="./rules.html">发行规则</a>。
+          <strong>提示：</strong>上传需消耗 X Layer 的 Gas（OKB）。发行前请确保唱片容器已在对应链上开通（<a href="https://id.tapeout.link" target="_blank">id.tapeout.link</a>），并阅读 <a href="./rules.html">发行规则</a>。
         </div>
       </div>
 
@@ -278,6 +285,9 @@
       <button id="shareBtn" class="mini__btn" aria-label="分享">
         <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18" aria-hidden="true"><path d="M18 16a3 3 0 0 0-2.4 1.2l-5.1-3a3.1 3.1 0 0 0 0-1.4l5.1-3A3 3 0 1 0 15 7a3.1 3.1 0 0 0 .1.7l-5.1 3a3 3 0 1 0 0 4.6l5.1 3A3 3 0 1 0 18 16z"/></svg>
       </button>
+      <button id="lyricsBtn" class="mini__btn" aria-label="歌词">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true"><path d="M4 5h16v2H4zm0 4h16v2H4zm0 4h10v2H4zm0 4h10v2H4zm14.5-2.5v-4h-2v4.2a2.3 2.3 0 1 0 2 2.3z"/></svg>
+      </button>
       <button id="queueBtn" class="mini__btn" aria-label="我的曲库">
         <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/></svg>
       </button>
@@ -294,6 +304,18 @@
         <button id="queueClose" class="icon-btn" aria-label="关闭">✕</button>
       </div>
       <div id="queueList" class="queue-list"></div>
+    </div>
+  </div>
+
+  <!-- 歌词抽屉 -->
+  <div id="lyricsSheet" class="sheet" hidden>
+    <div class="sheet__mask" data-close></div>
+    <div class="sheet__panel">
+      <div class="sheet__head">
+        <span class="sheet__title" data-i18n="lyrics.title">歌词</span>
+        <button id="lyricsClose" class="icon-btn" aria-label="关闭">✕</button>
+      </div>
+      <div id="lyricsList" class="lyrics-list"></div>
     </div>
   </div>
 
