@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="声刻 SonicMint 链上曲库">
+  <defs>
+    <radialGradient id="bgA" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#5b4be0" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#5b4be0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bgB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7c5cff" stop-opacity="0.13"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="disc" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#2a2a2a"/>
+      <stop offset="0.6" stop-color="#0a0a0a"/>
+      <stop offset="1" stop-color="#000000"/>
+    </radialGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b4be0"/>
+      <stop offset="1" stop-color="#7c5cff"/>
+    </linearGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8a8a8a"/>
+      <stop offset="1" stop-color="#d2d2d2"/>
+    </linearGradient>
+    <filter id="discShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <filter id="cardShadow" x="-20%" y="-30%" width="140%" height="180%">
+      <feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#15132c" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="#f4f3fa"/>
+  <ellipse cx="120" cy="-40" rx="720" ry="400" fill="url(#bgA)"/>
+  <ellipse cx="1180" cy="-10" rx="640" ry="380" fill="url(#bgB)"/>
+
+  <circle cx="310" cy="315" r="170" fill="url(#disc)" filter="url(#discShadow)"/>
+  <circle cx="310" cy="315" r="169" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+  <circle cx="310" cy="315" r="133" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+  <circle cx="310" cy="315" r="102" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+  <circle cx="310" cy="315" r="71" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+  <circle cx="310" cy="315" r="68" fill="url(#brand)"/>
+  <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" fill="#ffffff" fill-opacity="0.95"
+        transform="translate(310 315) scale(2.6) translate(-12 -12)"/>
+  <circle cx="310" cy="315" r="9" fill="#1a1a1a" stroke="#ffffff" stroke-opacity="0.18"/>
+  <line x1="470" y1="120" x2="326" y2="187" stroke="url(#silver)" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="470" cy="120" r="16" fill="url(#silver)"/>
+  <rect x="308" y="180" width="20" height="30" rx="5" fill="url(#silver)" transform="rotate(25 318 195)"/>
+
+  <g font-family="Microsoft YaHei" font-weight="700">
+    <g filter="url(#cardShadow)">
+      <rect x="620" y="130" width="290" height="56" rx="28" fill="#ffffff" stroke="#e8e6f2"/>
+    </g>
+    <rect x="636" y="144" width="28" height="28" rx="8" fill="url(#brand)"/>
+    <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" fill="#ffffff"
+          transform="translate(650 158) scale(1.2) translate(-12 -12)"/>
+    <text x="678" y="167" font-size="23" fill="#15132c">声刻 SonicMint</text>
+    <text x="620" y="288" font-size="62" fill="#15132c" letter-spacing="-1">链上曲库</text>
+    <text x="620" y="370" font-size="62" fill="url(#brand)" letter-spacing="-1">永久可播放的音乐</text>
+  </g>
+
+  <g font-family="Microsoft YaHei" fill="#6f6c8f" font-size="21">
+    <text x="620" y="430">所有音频存于 TapeOut 链上容器</text>
+    <text x="620" y="466">付费曲目加密上链，一次买断永久可听</text>
+    <text x="620" y="502">版税由智能合约即时结算</text>
+  </g>
+
+  <line x1="620" y1="540" x2="1140" y2="540" stroke="#e8e6f2"/>
+  <text x="620" y="578" font-family="Microsoft YaHei" font-size="20" font-weight="700" fill="#5b4be0">music.tapeout.link</text>
+  <text x="1140" y="578" font-family="Microsoft YaHei" font-size="18" fill="#6f6c8f" text-anchor="end">X Layer · TapeOut 链上容器</text>
+</svg>

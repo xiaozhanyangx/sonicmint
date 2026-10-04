@@ -4,7 +4,7 @@
  * ============================================================ */
 
 // 前端版本：与 sw.js 的 CACHE 版本同步维护，展示在侧边栏底部
-const APP_VERSION = "v65";
+const APP_VERSION = "v68";
 
 // ───────── 链配置（仅 X Layer）─────────
 // 核心合约地址需从 TapeOut 官方 X Layer 部署文档获取后填入
@@ -74,7 +74,7 @@ const PROCESSOR_FACTORY_ABI = [
   "function cpuAt(uint256 number) view returns (address)",
 ];
 const SONICMINT_ABI = [
-  "function registerTrack(address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, tuple(string title, string artistName, uint8 genre, uint256 price, bool free, bool encrypted, bytes32 artistPubKey, string lyricsPath) meta, bytes wrappedCEK, tuple(address addr, uint256 bps)[] royalties) returns (uint256)",
+  "function registerTrack(address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, tuple(string title, string artistName, uint8 genre, uint256 price, bool free, bool encrypted, bytes32 artistPubKey, string lyricsPath) meta, bytes wrappedCEK, bytes artistWrappedCEK, tuple(address addr, uint256 bps)[] royalties) returns (uint256)",
   "function play(uint256 trackId)",
   "function buy(uint256 trackId, bytes32 buyerPubKey) payable",
   "function trackCount() view returns (uint256)",
@@ -352,12 +352,28 @@ async function syncVault() {
 }
 
 // ───────── 版税分配 UI ─────────
+// 合计提示：合约把「抽成 3% 后未按版税分完的部分」都归平台（见 _distributeRoyalties），
+// 所以没配满 100% 时剩余部分不会留给艺人——在提交前就把这件事显示出来
+function updateRoyaltyTotal() {
+  const el = $("royaltyTotal");
+  if (!el) return;
+  if (royaltyRecipients.length === 0) { el.textContent = ""; return; }
+  const total = royaltyRecipients.reduce((s, r) => s + r.bps, 0);
+  const diff = 10000 - total;
+  el.style.color = diff === 0 ? "var(--muted)" : diff > 0 ? "var(--accent)" : "var(--danger)";
+  el.textContent = diff === 0
+    ? "已分配 100%"
+    : diff > 0
+      ? `已分配 ${(total / 100).toFixed(1)}%，剩余 ${(diff / 100).toFixed(1)}% 将归平台`
+      : `已分配 ${(total / 100).toFixed(1)}%，超出 ${(-diff / 100).toFixed(1)}%`;
+}
+
 function renderRoyaltyList() {
   const list = $("royaltyList");
   list.innerHTML = royaltyRecipients.map((r, i) => `
     <div class="royalty-item" data-idx="${i}">
       <input type="text" placeholder="收益方地址 0x..." value="${r.addr}" data-field="addr" />
-      <input type="number" min="1" max="10000" placeholder="比例(%)" value="${(r.bps / 100).toFixed(1)}" data-field="bps" />
+      <input type="number" min="1" max="100" placeholder="比例(%)" value="${(r.bps / 100).toFixed(1)}" data-field="bps" />
       <button data-idx="${i}">✕</button>
     </div>
   `).join("");
@@ -368,12 +384,14 @@ function renderRoyaltyList() {
     });
     item.querySelector('input[data-field="bps"]').addEventListener("change", (e) => {
       royaltyRecipients[idx].bps = Math.round(Number(e.target.value) * 100);
+      updateRoyaltyTotal();
     });
     item.querySelector("button").addEventListener("click", () => {
       royaltyRecipients.splice(idx, 1);
       renderRoyaltyList();
     });
   });
+  updateRoyaltyTotal();
 }
 
 // ───────── 上传音频 ─────────
@@ -502,9 +520,14 @@ async function uploadAudio() {
   if (!title || !artist || !file) { toast("请填写完整信息并选择音频文件", "err"); return; }
   if (!Number.isInteger(genre) || genre < 0 || genre >= GENRES.length) { toast(T("pub.genrePick"), "err"); return; }
 
-  // 版税校验
+  // 版税校验：列表非空时必须正好凑满 100%，否则未配满的部分会被合约分给平台
   const totalBps = royaltyRecipients.reduce((s, r) => s + r.bps, 0);
-  if (totalBps > 10000) { toast(`版税比例总和 ${(totalBps/100).toFixed(1)}% 超过 100%`, "err"); return; }
+  if (royaltyRecipients.length > 0 && totalBps !== 10000) {
+    toast(`版税比例需凑满 100%（当前 ${(totalBps/100).toFixed(1)}%），未配满的部分会归平台`, "err"); return;
+  }
+  for (const r of royaltyRecipients) {
+    if (!ethers.isAddress((r.addr || "").trim())) { toast("收益方地址无效，请填写 0x 开头的完整地址", "err"); return; }
+  }
 
   // 买断价（免费唱片可留空）
   const isFree = $("inFree") ? $("inFree").checked : false;
@@ -527,9 +550,10 @@ async function uploadAudio() {
     const basePath = `music/${tokenId}.${cpu}`;
     const coverBuf = coverFile ? new Uint8Array(await coverFile.arrayBuffer()) : null;
 
-    // ─── 加密音频（付费曲目）：随机 K 加密，K 封给 keeper 后上链 ───
+    // ─── 加密音频（付费曲目）：随机 K 加密，K 封给 keeper 与艺人自己后上链 ───
     let buf = new Uint8Array(await file.arrayBuffer());
     let wrappedCEK = "0x";
+    let artistWrappedCEK = "0x";
     let artistPubKey = ethers.ZeroHash;
     let cek = null; // 内容密钥 K，歌词复用同一把
     if (encrypted) {
@@ -543,6 +567,11 @@ async function uploadAudio() {
       wrappedCEK = lib.bytesToHex(lib.wrapKeyFor(cek, {
         address: KEEPER.address,
         publicKey: lib.pubKeyBytes(KEEPER.publicKey),
+      }, cfg));
+      // 保险丝：同一把 K 再封一份给艺人自己（keeper 密钥轮换时凭它重封）
+      artistWrappedCEK = lib.bytesToHex(lib.wrapKeyFor(cek, {
+        address: account,
+        publicKey: kp.publicKey,
       }, cfg));
     }
 
@@ -642,10 +671,10 @@ async function uploadAudio() {
 
     // 注册曲目
     status.textContent = "注册曲目…";
-    const royalties = royaltyRecipients.map((r) => ({ addr: r.addr, bps: r.bps }));
+    const royalties = royaltyRecipients.map((r) => ({ addr: r.addr.trim(), bps: r.bps }));
     const audioPath = partCount > 1 ? basePath : `${basePath}.${ext}`;
     const meta = { title, artistName: artist, genre, price: priceWei, free: isFree, encrypted, artistPubKey, lyricsPath };
-    const tx = await musicContract.registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, royalties);
+    const tx = await musicContract.registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, artistWrappedCEK, royalties);
     const rc = await tx.wait();
     const evt = rc.logs.find((l) => l.fragment && l.fragment.name === "TrackRegistered");
     const trackId = evt ? evt.args[0].toString() : "?";

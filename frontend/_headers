@@ -25,6 +25,14 @@
 /ethers.min.js
   Cache-Control: public, max-age=31536000, immutable
 
+# 分享图与爬虫文件：内容稳定，给较长缓存
+/og.png
+  Cache-Control: public, max-age=604800
+/robots.txt
+  Cache-Control: public, max-age=3600
+/sitemap.xml
+  Cache-Control: public, max-age=3600
+
 # 全局安全响应头
 /*
   X-Content-Type-Options: nosniff

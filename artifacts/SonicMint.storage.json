@@ -1,0 +1,374 @@
+{
+  "storage": [
+    {
+      "astId": 100,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "tracks",
+      "offset": 0,
+      "slot": "0",
+      "type": "t_mapping(t_uint256,t_struct(Track)95_storage)"
+    },
+    {
+      "astId": 106,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "trackRoyalties",
+      "offset": 0,
+      "slot": "1",
+      "type": "t_mapping(t_uint256,t_array(t_struct(RoyaltyRecipient)38_storage)dyn_storage)"
+    },
+    {
+      "astId": 110,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "sealedCEK",
+      "offset": 0,
+      "slot": "2",
+      "type": "t_mapping(t_uint256,t_bytes_storage)"
+    },
+    {
+      "astId": 112,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "trackCount",
+      "offset": 0,
+      "slot": "3",
+      "type": "t_uint256"
+    },
+    {
+      "astId": 114,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "platform",
+      "offset": 0,
+      "slot": "4",
+      "type": "t_address"
+    },
+    {
+      "astId": 116,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "keeper",
+      "offset": 0,
+      "slot": "5",
+      "type": "t_address"
+    },
+    {
+      "astId": 122,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "allowedProcessor",
+      "offset": 0,
+      "slot": "6",
+      "type": "t_address"
+    },
+    {
+      "astId": 128,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "purchased",
+      "offset": 0,
+      "slot": "7",
+      "type": "t_mapping(t_address,t_mapping(t_uint256,t_bool))"
+    },
+    {
+      "astId": 132,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "userPubKey",
+      "offset": 0,
+      "slot": "8",
+      "type": "t_mapping(t_address,t_bytes32)"
+    },
+    {
+      "astId": 136,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "_vault",
+      "offset": 0,
+      "slot": "9",
+      "type": "t_mapping(t_address,t_bytes_storage)"
+    },
+    {
+      "astId": 140,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "artistCEK",
+      "offset": 0,
+      "slot": "10",
+      "type": "t_mapping(t_uint256,t_bytes_storage)"
+    },
+    {
+      "astId": 142,
+      "contract": "contracts/SonicMint.sol:SonicMint",
+      "label": "_locked",
+      "offset": 0,
+      "slot": "11",
+      "type": "t_bool"
+    }
+  ],
+  "types": {
+    "t_address": {
+      "encoding": "inplace",
+      "label": "address",
+      "numberOfBytes": "20"
+    },
+    "t_array(t_struct(RoyaltyRecipient)38_storage)dyn_storage": {
+      "base": "t_struct(RoyaltyRecipient)38_storage",
+      "encoding": "dynamic_array",
+      "label": "struct SonicMint.RoyaltyRecipient[]",
+      "numberOfBytes": "32"
+    },
+    "t_bool": {
+      "encoding": "inplace",
+      "label": "bool",
+      "numberOfBytes": "1"
+    },
+    "t_bytes32": {
+      "encoding": "inplace",
+      "label": "bytes32",
+      "numberOfBytes": "32"
+    },
+    "t_bytes_storage": {
+      "encoding": "bytes",
+      "label": "bytes",
+      "numberOfBytes": "32"
+    },
+    "t_mapping(t_address,t_bytes32)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => bytes32)",
+      "numberOfBytes": "32",
+      "value": "t_bytes32"
+    },
+    "t_mapping(t_address,t_bytes_storage)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => bytes)",
+      "numberOfBytes": "32",
+      "value": "t_bytes_storage"
+    },
+    "t_mapping(t_address,t_mapping(t_uint256,t_bool))": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => mapping(uint256 => bool))",
+      "numberOfBytes": "32",
+      "value": "t_mapping(t_uint256,t_bool)"
+    },
+    "t_mapping(t_uint256,t_array(t_struct(RoyaltyRecipient)38_storage)dyn_storage)": {
+      "encoding": "mapping",
+      "key": "t_uint256",
+      "label": "mapping(uint256 => struct SonicMint.RoyaltyRecipient[])",
+      "numberOfBytes": "32",
+      "value": "t_array(t_struct(RoyaltyRecipient)38_storage)dyn_storage"
+    },
+    "t_mapping(t_uint256,t_bool)": {
+      "encoding": "mapping",
+      "key": "t_uint256",
+      "label": "mapping(uint256 => bool)",
+      "numberOfBytes": "32",
+      "value": "t_bool"
+    },
+    "t_mapping(t_uint256,t_bytes_storage)": {
+      "encoding": "mapping",
+      "key": "t_uint256",
+      "label": "mapping(uint256 => bytes)",
+      "numberOfBytes": "32",
+      "value": "t_bytes_storage"
+    },
+    "t_mapping(t_uint256,t_struct(Track)95_storage)": {
+      "encoding": "mapping",
+      "key": "t_uint256",
+      "label": "mapping(uint256 => struct SonicMint.Track)",
+      "numberOfBytes": "32",
+      "value": "t_struct(Track)95_storage"
+    },
+    "t_string_storage": {
+      "encoding": "bytes",
+      "label": "string",
+      "numberOfBytes": "32"
+    },
+    "t_struct(RoyaltyRecipient)38_storage": {
+      "encoding": "inplace",
+      "label": "struct SonicMint.RoyaltyRecipient",
+      "members": [
+        {
+          "astId": 35,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "addr",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_address"
+        },
+        {
+          "astId": 37,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "bps",
+          "offset": 0,
+          "slot": "1",
+          "type": "t_uint256"
+        }
+      ],
+      "numberOfBytes": "64"
+    },
+    "t_struct(Track)95_storage": {
+      "encoding": "inplace",
+      "label": "struct SonicMint.Track",
+      "members": [
+        {
+          "astId": 58,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "artist",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_address"
+        },
+        {
+          "astId": 60,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "container",
+          "offset": 0,
+          "slot": "1",
+          "type": "t_address"
+        },
+        {
+          "astId": 62,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "tokenId",
+          "offset": 0,
+          "slot": "2",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 64,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "cpu",
+          "offset": 0,
+          "slot": "3",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 66,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "audioPath",
+          "offset": 0,
+          "slot": "4",
+          "type": "t_string_storage"
+        },
+        {
+          "astId": 68,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "partCount",
+          "offset": 0,
+          "slot": "5",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 70,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "coverPath",
+          "offset": 0,
+          "slot": "6",
+          "type": "t_string_storage"
+        },
+        {
+          "astId": 72,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "lyricsPath",
+          "offset": 0,
+          "slot": "7",
+          "type": "t_string_storage"
+        },
+        {
+          "astId": 74,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "title",
+          "offset": 0,
+          "slot": "8",
+          "type": "t_string_storage"
+        },
+        {
+          "astId": 76,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "artistName",
+          "offset": 0,
+          "slot": "9",
+          "type": "t_string_storage"
+        },
+        {
+          "astId": 78,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "genre",
+          "offset": 0,
+          "slot": "10",
+          "type": "t_uint8"
+        },
+        {
+          "astId": 80,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "playCount",
+          "offset": 0,
+          "slot": "11",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 82,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "totalEarned",
+          "offset": 0,
+          "slot": "12",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 84,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "createdAt",
+          "offset": 0,
+          "slot": "13",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 86,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "price",
+          "offset": 0,
+          "slot": "14",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 88,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "free",
+          "offset": 0,
+          "slot": "15",
+          "type": "t_bool"
+        },
+        {
+          "astId": 90,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "encrypted",
+          "offset": 1,
+          "slot": "15",
+          "type": "t_bool"
+        },
+        {
+          "astId": 92,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "artistPubKey",
+          "offset": 0,
+          "slot": "16",
+          "type": "t_bytes32"
+        },
+        {
+          "astId": 94,
+          "contract": "contracts/SonicMint.sol:SonicMint",
+          "label": "exists",
+          "offset": 0,
+          "slot": "17",
+          "type": "t_bool"
+        }
+      ],
+      "numberOfBytes": "576"
+    },
+    "t_uint256": {
+      "encoding": "inplace",
+      "label": "uint256",
+      "numberOfBytes": "32"
+    },
+    "t_uint8": {
+      "encoding": "inplace",
+      "label": "uint8",
+      "numberOfBytes": "1"
+    }
+  }
+}

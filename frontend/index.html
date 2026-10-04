@@ -3,12 +3,68 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>声刻 · 链上音乐</title>
-  <meta name="description" content="声刻 SonicMint：播放链上永久音乐，一次买断永久可听，付费曲目加密上链，版税即时结算。" />
+  <title>声刻 SonicMint · 链上音乐平台｜永久可播放的 Web3 音乐</title>
+  <meta name="description" content="声刻 SonicMint 是基于 TapeOut 协议的去中心化音乐发行平台：音频永久上链，付费曲目加密存储，一次买断永久可听，版税由智能合约即时结算。运行于 X Layer，无需服务器。" />
+  <meta name="keywords" content="链上音乐,Web3 音乐,音乐 NFT,去中心化音乐平台,TapeOut,X Layer,买断制音乐,版税结算,加密音乐,音乐发行" />
+  <meta name="author" content="声刻 SonicMint" />
+  <meta name="robots" content="index,follow" />
+  <link rel="canonical" href="https://music.tapeout.link/" />
   <meta name="theme-color" content="#5b4be0" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="声刻 SonicMint" />
+  <meta property="og:title" content="声刻 SonicMint · 链上曲库｜永久可播放的音乐" />
+  <meta property="og:description" content="音频永久上链，付费曲目加密存储，一次买断永久可听，版税由智能合约即时结算。" />
+  <meta property="og:url" content="https://music.tapeout.link/" />
+  <meta property="og:image" content="https://music.tapeout.link/og.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="声刻 SonicMint：链上曲库，永久可播放的音乐" />
+  <meta property="og:locale" content="zh_CN" />
+  <meta property="og:locale:alternate" content="en_US" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="声刻 SonicMint · 链上曲库｜永久可播放的音乐" />
+  <meta name="twitter:description" content="音频永久上链，付费曲目加密存储，一次买断永久可听，版税由智能合约即时结算。" />
+  <meta name="twitter:image" content="https://music.tapeout.link/og.png" />
+  <meta name="twitter:image:alt" content="声刻 SonicMint：链上曲库，永久可播放的音乐" />
+
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235b4be0'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle'%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
   <link rel="stylesheet" href="./style.css" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://music.tapeout.link/#website",
+        "url": "https://music.tapeout.link/",
+        "name": "声刻 SonicMint",
+        "alternateName": "SonicMint",
+        "description": "链上音乐发行平台：音频永久上链，一次买断永久可听，版税即时结算。",
+        "inLanguage": "zh-CN"
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://music.tapeout.link/#app",
+        "name": "声刻 SonicMint",
+        "url": "https://music.tapeout.link/",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web",
+        "browserRequirements": "需要支持 Web3 钱包的现代浏览器",
+        "description": "基于 TapeOut 协议的去中心化音乐发行平台，运行于 X Layer。",
+        "inLanguage": ["zh-CN", "en"],
+        "isPartOf": { "@id": "https://music.tapeout.link/#website" }
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <div class="shell">
@@ -195,6 +251,7 @@
           <div class="form__row">
             <label data-i18n="pub.royalty">版税分配（可选，留空则艺人 100%）</label>
             <div id="royaltyList" class="royalty-list"></div>
+            <div id="royaltyTotal" class="muted small"></div>
             <button id="addRoyaltyBtn" class="btn btn--ghost small-btn" data-i18n="pub.addRoyalty">+ 添加收益方</button>
           </div>
 
