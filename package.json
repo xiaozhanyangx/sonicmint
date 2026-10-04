@@ -7,7 +7,6 @@
   "scripts": {
     "compile": "node scripts/compile.js",
     "deploy": "node scripts/deploy.js",
-    "check:upgrade": "node scripts/check-upgrade.js",
     "upload-audio": "node scripts/upload-audio.js",
     "publish-site": "node scripts/publish-site.js",
     "build:crypto": "node scripts/build-crypto.js",

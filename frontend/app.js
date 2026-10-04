@@ -4,7 +4,7 @@
  * ============================================================ */
 
 // 前端版本：与 sw.js 的 CACHE 版本同步维护，展示在侧边栏底部
-const APP_VERSION = "v68";
+const APP_VERSION = "v70";
 
 // ───────── 链配置（仅 X Layer）─────────
 // 核心合约地址需从 TapeOut 官方 X Layer 部署文档获取后填入
@@ -74,7 +74,7 @@ const PROCESSOR_FACTORY_ABI = [
   "function cpuAt(uint256 number) view returns (address)",
 ];
 const SONICMINT_ABI = [
-  "function registerTrack(address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, tuple(string title, string artistName, uint8 genre, uint256 price, bool free, bool encrypted, bytes32 artistPubKey, string lyricsPath) meta, bytes wrappedCEK, bytes artistWrappedCEK, tuple(address addr, uint256 bps)[] royalties) returns (uint256)",
+  "function registerTrack(address container, uint256 tokenId, uint256 cpu, string audioPath, uint256 partCount, string coverPath, tuple(string title, string artistName, uint8 genre, uint256 price, bool free, bool encrypted, bytes32 artistPubKey, string lyricsPath) meta, bytes wrappedCEK, tuple(address addr, uint256 bps)[] royalties) returns (uint256)",
   "function play(uint256 trackId)",
   "function buy(uint256 trackId, bytes32 buyerPubKey) payable",
   "function trackCount() view returns (uint256)",
@@ -550,10 +550,9 @@ async function uploadAudio() {
     const basePath = `music/${tokenId}.${cpu}`;
     const coverBuf = coverFile ? new Uint8Array(await coverFile.arrayBuffer()) : null;
 
-    // ─── 加密音频（付费曲目）：随机 K 加密，K 封给 keeper 与艺人自己后上链 ───
+    // ─── 加密音频（付费曲目）：随机 K 加密，K 封给 keeper 后上链 ───
     let buf = new Uint8Array(await file.arrayBuffer());
     let wrappedCEK = "0x";
-    let artistWrappedCEK = "0x";
     let artistPubKey = ethers.ZeroHash;
     let cek = null; // 内容密钥 K，歌词复用同一把
     if (encrypted) {
@@ -567,11 +566,6 @@ async function uploadAudio() {
       wrappedCEK = lib.bytesToHex(lib.wrapKeyFor(cek, {
         address: KEEPER.address,
         publicKey: lib.pubKeyBytes(KEEPER.publicKey),
-      }, cfg));
-      // 保险丝：同一把 K 再封一份给艺人自己（keeper 密钥轮换时凭它重封）
-      artistWrappedCEK = lib.bytesToHex(lib.wrapKeyFor(cek, {
-        address: account,
-        publicKey: kp.publicKey,
       }, cfg));
     }
 
@@ -674,7 +668,7 @@ async function uploadAudio() {
     const royalties = royaltyRecipients.map((r) => ({ addr: r.addr.trim(), bps: r.bps }));
     const audioPath = partCount > 1 ? basePath : `${basePath}.${ext}`;
     const meta = { title, artistName: artist, genre, price: priceWei, free: isFree, encrypted, artistPubKey, lyricsPath };
-    const tx = await musicContract.registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, artistWrappedCEK, royalties);
+    const tx = await musicContract.registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, royalties);
     const rc = await tx.wait();
     const evt = rc.logs.find((l) => l.fragment && l.fragment.name === "TrackRegistered");
     const trackId = evt ? evt.args[0].toString() : "?";

@@ -15,7 +15,6 @@
 
 - [核心机制](#核心机制)
 - [技术架构](#技术架构)
-- [系统流程](#系统流程)
 - [项目结构](#项目结构)
 - [已部署地址](#已部署地址)
 - [快速开始](#快速开始)
@@ -85,85 +84,9 @@ keeper 是一个 Cloudflare Worker，唯一职责是 `POST /sync { user, chainId
 └───────────────┬──────────────┘  └────────┬───────────────┘
                 │                          │
 ┌───────────────▼──────────────────────────▼───────────────┐
-│  SonicMint 代理（X Layer，ERC-1967）   ← hub，永久固定      │
-│  │ delegatecall，地址与密钥体系不动                        │
-│  └─→ SonicMint 实现（v5，可升级）                          │
-│       曲目登记 · 买断收款 · 版税分流                        │
-│       sealedCEK / artistCEK / vault · UUPS 升级 / 封印     │
+│  SonicMint 合约（X Layer）                                 │
+│  曲目登记 · 买断收款 · 版税分流 · sealedCEK / vault 存储    │
 └──────────────────────────────────────────────────────────┘
-```
-
----
-
-## 系统流程
-
-### 数据落点
-
-| 数据 | 存放 | 可读性 |
-|---|---|---|
-| 加密音频 / 封面 / 歌词 | TapeOut ERC-6551 容器（分块上链） | 任何人（密文） |
-| 曲目元数据、版税配置、买断记录 | SonicMint 代理存储 | 任何人 |
-| `sealedCEK`：K 封给 keeper | SonicMint 代理存储 | 任何人（密文） |
-| `artistCEK`：K 封给艺人自己 | SonicMint 代理存储 | 任何人（密文） |
-| `userPubKey` / `vault` | SonicMint 代理存储 | 任何人（密文） |
-| 明文内容密钥 K | 仅内存 | keeper、已买断买家 |
-| 派生的 X25519 私钥 | 仅内存（每次由钱包签名重算，不落盘） | 本人 |
-
-流程一至四都围绕同一把内容密钥 K：发行时 K 封两份上链，买断时 keeper 用其中一份解 K 再逐用户重封；流程五是合约自身的生命周期管理，与 K 无关。
-
-### 流程一 · 发行（艺人）
-
-```
-选文件
-  → 派生艺人密钥对：钱包对固定文案签名（EIP-191）→ HKDF-SHA256 → X25519
-  → 生成随机内容密钥 K
-  → 用 K 加密音频与歌词（XChaCha20-Poly1305）
-  → K 封给 keeper 公钥 → wrappedCEK        上链存 sealedCEK[trackId]
-  → K 封给艺人自己公钥 → artistWrappedCEK  上链存 artistCEK[trackId]   ← 保险丝
-  → 临时操作员分片上传密文到容器（293 次签名压到 4 次，见「核心机制」）
-  → registerTrack(容器, tokenId, cpu, ..., wrappedCEK, artistWrappedCEK, 版税表)
-      合约依次校验：处理器白名单 → 容器归属 → 容器已开启 → 版税总和 ≤ 10000
-```
-
-### 流程二 · 买断与密钥交付（听众）
-
-```
-买入前先派生买家密钥对（同一套签名派生）
-  → buy(trackId, buyerPubKey) 付款
-      合约：记 purchased 与 userPubKey，即时分流版税，不留余额
-  → 前端 POST https://keeper.tapeout.link/sync { user, chainId }
-      keeper：读 sealedCEK → 用 keeper 私钥解出 K
-              → 用买家公钥重新封装 → setVault 写回链上
-  → 买家本地：读 vaultOf(自己) → 用派生私钥解出 K
-```
-
-### 流程三 · 播放
-
-```
-免费曲目：直连容器取明文 → 播放
-付费曲目：vault 解出 K → 用 K 解容器密文 → 播放（记录一次 play）
-```
-
-### 流程四 · keeper 密钥轮换（保险丝）
-
-```
-keeper 换密钥
-  → 艺人取 artistCEK[trackId] → 用自己派生私钥解出 K
-  → K 封给新 keeper 公钥 → rewrapCEK(trackId, 新载荷)
-```
-
-> 合约层的 `rewrapCEK` 已就绪，但**前端还没有操作入口**（曲目管理页缺「重封」按钮）。keeper 出事前需补上这一步，否则保险丝只有写入端、没有使用端。
-
-### 流程五 · 升级与封印（运维）
-
-```
-备份 artifacts/SonicMint.storage.json
-  → 改实现代码（存储变量只许末尾追加）
-  → npm run compile
-  → npm run check:upgrade 比对布局，确认旧变量原样保留
-  → 部署新实现（FACTORY / OPENER 填相同值）
-  → upgradeToAndCall(新实现, 0x)   仅 platform 可调；地址不变，全站密钥体系不动
-  → 确认终局：seal()   永久关闭升级路径
 ```
 
 ---
@@ -173,9 +96,7 @@ keeper 换密钥
 ```
 tapeout-music/
 ├── contracts/
-│   ├── SonicMint.sol          # 核心合约（实现）：曲目登记 + 买断 + 版税 + 密钥分发
-│   ├── SonicMintAdmin.sol     # UUPS 管理基座：升级 / 封印（适配自 TapeKit DeWebAdmin）
-│   └── SonicMintProxy.sol     # ERC-1967 代理：hub 地址永久固定（适配自 TapeKit DeWebProxy）
+│   └── SonicMint.sol          # 核心合约：曲目登记 + 买断 + 版税 + 密钥分发
 ├── frontend/
 │   ├── index.html             # 单页应用：音乐广场 / 发行 / 我的（hash 路由）
 │   ├── publish.html           # 跳转到 index.html#publish
@@ -186,18 +107,21 @@ tapeout-music/
 │   ├── style.css              # 样式（浅色 / 深色）
 │   ├── sw.js                  # Service Worker（PWA 离线缓存）
 │   ├── ethers.min.js          # ethers v6（本地化）
+│   ├── og.png                 # 分享图（Open Graph / Twitter Card）
+│   ├── robots.txt             # 抓取规则
+│   ├── sitemap.xml            # 站点地图
 │   └── vendor/tap10/          # TAP-10 密钥派生与载荷（fork 自 TapeKit）
 ├── keeper/
 │   ├── src/worker.js          # keeper Worker 源码
 │   ├── dist/worker.js         # 打包产物（部署用）
 │   └── wrangler.toml          # Worker 配置（自定义域名 + 合约地址）
 ├── scripts/
-│   ├── compile.js             # solc 编译（实现 + 代理 + 存储布局）→ artifacts/
-│   ├── deploy.js              # 部署实现 + 代理并登记 keeper
-│   ├── check-upgrade.js       # 升级前比对存储布局（只增不改）
+│   ├── compile.js             # solc 编译 → artifacts/
+│   ├── deploy.js              # 部署合约并登记 keeper
 │   ├── keeper-key.js          # 派生 keeper 公钥并回填 app.js
 │   ├── build-crypto.js        # vendor/tap10 → frontend/crypto.js
 │   ├── build-keeper.js        # keeper/src → keeper/dist
+│   ├── build-og.js            # og.svg → frontend/og.png（分享图）
 │   ├── upload-audio.js        # CLI：直接上传音频到容器（自用，零点击）
 │   └── publish-site.js        # CLI：把前端发到 TapeOut 容器
 ├── artifacts/                 # 编译产物（ABI + bytecode）
@@ -212,16 +136,12 @@ tapeout-music/
 
 | 名称 | 地址 |
 |---|---|
-| SonicMint v4（已弃用：代理化之前的旧合约） | `0x243000a1BA9058E6A856d5AFAbAE575f9E549130` |
-| SonicMint 代理（hub，v5，**地址永久固定**） | 部署后填写 |
-| SonicMint 实现（仅升级用，随版本更换） | 部署后填写 |
+| SonicMint（本平台合约） | `0x243000a1BA9058E6A856d5AFAbAE575f9E549130` |
 | SiteRegistry（TapeOut 容器存储） | `0xd6efb7adcc9c83dc4924ad56f6a8e4e969b9adb6` |
 | ContainerOpener（TapeOut 容器开启器） | `0x536add8f30f03b69f6fbf29d425a816a0dc50106` |
 | ProcessorFactory（TapeOut 处理器工厂） | `0x1f09daefa827f02cbb40967cc91b259763760761` |
 | 处理器 #260 | `0x0AbBcbCd6d822C79480fe8abe01952197a399008` |
 | keeper（Worker 签名地址） | `0xE2f67d8AaefDfe8622E8dDDEF6f0D9fcda2db750` |
-
-> v5 起合约经 ERC-1967 代理运行：**hub = 代理地址，一经部署永不更换**（它是密钥派生与载荷封装的输入，换地址等于全体密钥作废）。改逻辑只升级实现，地址不动。
 
 ---
 
@@ -241,21 +161,18 @@ npx serve frontend       # 本地预览（链上交互需先部署合约）
 
 ### 1. 合约
 
-部署的是「实现 + 代理」两份合约，**hub = 代理地址**，业务操作一律走代理：
-
 ```bash
 PRIVATE_KEY=0x... \
 PROCESSOR=0x... \                    # 唯一允许发行的处理器地址（当前 #260）
 PLATFORM=0x... \                     # 平台收款地址，默认取部署者
+PLATFORM_BPS=300 \                   # 平台抽成（基点）
 KEEPER=0x... \                       # 可选：顺带登记 keeper
 npm run deploy
 ```
 
-> 平台抽成固定 3%（合约常量 `PLATFORM_BPS`）。`FACTORY`/`OPENER` 是实现的 immutable 协议常量，升级部署新实现时必须填相同值。
+### 2. 重部署后的连锁改动
 
-### 2. 部署后的连锁改动（v5 部署后做一次，之后不再有）
-
-合约地址是密钥派生的输入（`hub`），本次部署后按旧流程收尾一次：
+合约地址是密钥派生的输入（`hub`），**改地址必须走完这 4 步**，否则 keeper 封装出来的 vault 前端解不开：
 
 ```bash
 # a. 更新 frontend/app.js 的 NETWORKS[196].music 与 keeper/wrangler.toml 的 CONTRACT
@@ -270,27 +187,7 @@ npm run deploy:web
 
 > 上面是逐条执行。PowerShell 5 不支持 `&&`，要串行写用 `;`。
 
-### 3. 升级（地址不变）与封印
-
-v5 起改逻辑不再换地址，走 UUPS 升级：
-
-```bash
-# a. 备份当前存储布局（升级比对的基线）
-Copy-Item artifacts/SonicMint.storage.json artifacts/SonicMint.storage.v5.json
-# b. 修改实现代码（存储变量只许在末尾追加），重新编译
-npm run compile
-# c. 比对布局：旧变量必须原样保留，新变量只许追加
-npm run check:upgrade artifacts/SonicMint.storage.v5.json artifacts/SonicMint.storage.json
-# d. 用相同 FACTORY/OPENER 部署新实现，再经代理调用
-#    upgradeToAndCall(新实现地址, 0x)     —— 仅 platform 可调
-```
-
-- 升级校验内建于合约：新实现必须通过 `proxiableUUID` + `selfAddress` 双重检查，传错地址（EOA、代理自身、非 UUPS 合约）直接回滚
-- 重大升级建议先用 `RPC_URL` 指向测试网，把「部署 → 升级 → 验证 sealedCEK/vault 可读」整个流程走一遍
-- **封印**：确认永不再升级后，经代理调用 `seal()`，升级路径永久关闭，合约定格为不可升级
-- 信任提示：封印前 platform 可以升级实现、改写一切逻辑（含密钥分发），这是中心化信任点，须向用户明示
-
-### 4. keeper Worker
+### 3. keeper Worker
 
 ```bash
 # 首次需写入私钥（用 stdin 管道，避免 BOM 污染）
@@ -307,7 +204,7 @@ curl https://keeper.tapeout.link/info
 
 返回的 `publicKey` 必须与 `frontend/app.js` 里的 `KEEPER.publicKey` 一致。
 
-### 5. 前端
+### 4. 前端
 
 ```bash
 npm run deploy:web       # Cloudflare Pages（当前生产）
@@ -332,14 +229,11 @@ npm run deploy:web       # Cloudflare Pages（当前生产）
 
 | 函数 | 说明 |
 |---|---|
-| `registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, artistWrappedCEK, royalties)` | 登记曲目。校验处理器白名单、容器归属与开启状态；加密曲目须同时提交封给艺人自己的 `artistWrappedCEK`（保险丝）；返回 `trackId` |
+| `registerTrack(container, tokenId, cpu, audioPath, partCount, coverPath, meta, wrappedCEK, royalties)` | 登记曲目。校验处理器白名单、容器归属与开启状态；返回 `trackId` |
 | `play(trackId)` | 记录一次播放（不收费）。需免费或已买断 |
 | `buy(trackId, buyerPubKey)` payable | 买断，收入即时分流。加密曲目必传买家 X25519 公钥 |
 | `setVault(user, payload)` | 写入某用户的全量 vault（仅 keeper 或平台） |
-| `rewrapCEK(trackId, newWrapped)` | 艺人重封内容密钥（keeper 密钥轮换时凭 artistCEK 解出 K 再封给新 keeper） |
-| `setSealedCEK(trackId, wrapped)` | keeper 补写内容密钥载荷（迁移与纠错用） |
-| `upgradeToAndCall(newImpl, data)` / `seal()` / `isSealed()` | UUPS 升级与永久封印（仅 platform） |
-| `setPlatform` / `setKeeper` / `setAllowedProcessor` | 平台管理（仅平台） |
+| `setPlatform` / `setPlatformBps` / `setKeeper` / `setAllowedProcessor` | 平台管理（仅平台） |
 
 ### 读取
 
@@ -352,7 +246,6 @@ npm run deploy:web       # Cloudflare Pages（当前生产）
 | `vaultOf(user)` | 用户的 vault 载荷 |
 | `userPubKey(user)` | 用户登记的 X25519 公钥 |
 | `sealedCEK(trackId)` | 封给 keeper 的内容密钥载荷 |
-| `artistCEK(trackId)` | 封给艺人自己的内容密钥载荷（保险丝） |
 | `tracks(trackId)` / `purchased(user, trackId)` | 自动生成的 public 映射 |
 
 ### 数据结构
@@ -398,13 +291,11 @@ struct RoyaltyRecipient { address addr; uint256 bps; }  // 10000 = 100%
 
 `_distributeRoyalties` 的顺序：
 
-1. 平台抽成固定 3%（`amount × PLATFORM_BPS / 10000`）
+1. 平台抽成 `amount × platformBps / 10000`
 2. 剩余部分按 `trackRoyalties` 的 bps 分配
 3. 取整余数归平台，确保金额全部分出
 
 `royalties` 为空数组时默认艺人拿 100%。
-
-> 前端对非空版税表强制要求总和正好 100%（未配满时实时提示「剩余 X% 将归平台」）。合约层只校验 `≤ 10000`，未配满的部分会连同取整余数一起归平台——绕过前端直接调合约仍会踩这个坑。
 
 ### 安全设计
 
@@ -412,7 +303,6 @@ struct RoyaltyRecipient { address addr; uint256 bps; }  // 10000 = 100%
 - 外部转账限定 100k gas，防接收方合约吞噬
 - 处理器由合约自行从工厂查询，不接受调用方传入，无法绕过白名单
 - 容器地址必须等于 `opener.accountOf(cpuAt(cpu), tokenId)` 且已开启
-- v5 起经 ERC-1967 代理运行：存储只许末尾追加（`npm run check:upgrade` 比对布局），新实现须经 `proxiableUUID` + `selfAddress` 双重校验；业务函数带 `onlyProxy` 守卫，直接调用实现合约一律回滚；`seal()` 后永久不可升级
 
 ---
 
@@ -465,7 +355,7 @@ music/{tokenId}.{cpu}.lrc            # 歌词
 | `chainId` | 196 |
 | `tokenId` / `cpuIndex` | `1` / `0` |
 | `container` / `holder` | 用户（或 keeper）自身地址 |
-| `hub` | SonicMint 代理地址（v5 起永久固定） |
+| `hub` | SonicMint 合约地址 |
 
 派生方式：钱包对固定文案签一次名（EIP-191），由签名经 HKDF-SHA256 导出 X25519 密钥对。前端与 keeper 用同一套 `frontend/vendor/tap10/keys.js`，结果确定性一致。
 
