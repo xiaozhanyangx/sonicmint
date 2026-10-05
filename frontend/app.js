@@ -4,7 +4,7 @@
  * ============================================================ */
 
 // 前端版本：与 sw.js 的 CACHE 版本同步维护，展示在侧边栏底部
-const APP_VERSION = "v70";
+const APP_VERSION = "v73";
 
 // ───────── 链配置（仅 X Layer）─────────
 // 核心合约地址需从 TapeOut 官方 X Layer 部署文档获取后填入
@@ -771,9 +771,9 @@ function trackRowHtml(i) {
       ? `<span class="tag tag--own">${T("lib.owned")}</span>`
       : "";
   const genreTag = `<span class="tag">${T("genre." + Number(t.genre))}</span>`;
-  // 买断价：付费且未买断时显示在信息行
+  // 买断价：付费且未买断时与购买按钮同一行显示
   const priceInfo = locked ? `<span class="tag tag--price">${ethers.formatEther(t.price)} ${sym()}</span>` : "";
-  // TapeOut 容器名：tokenId.区号.cpu，便于在 TapeOut 侧定位该容器
+  // TapeOut 容器名：tokenId.区号.cpu，显示在封面右上角，便于在 TapeOut 侧定位该容器
   const containerId = `${Number(t.tokenId)}.${CHAIN_AREA}.${Number(t.cpu)}`;
   return `
     <div class="track${locked ? " is-locked" : ""}" data-track="${i}">
@@ -782,17 +782,16 @@ function trackRowHtml(i) {
           ? `<img src="${coverUrl}" class="track__cover" alt="封面" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" /><span class="track__fallback" style="display:none">🎵</span>`
           : `<span class="track__fallback">🎵</span>`}
         ${stateTag ? `<div class="track__state">${stateTag}</div>` : ""}
+        <span class="track__cid" title="TapeOut 容器">${containerId}</span>
       </div>
       <div class="track__body">
         <div class="track__title">${escapeHtml(t.title)}</div>
         <div class="track__artist">${escapeHtml(t.artistName)}</div>
         <div class="track__meta">
           ${genreTag}
-          <span class="track__cid" title="TapeOut 容器">${containerId}</span>
-          ${priceInfo}
         </div>
       </div>
-      ${locked ? `<div class="track__actions"><button class="btn btn--primary btn--sm" data-buy="${i}">${T("player.buy")}</button></div>` : ""}
+      ${locked ? `<div class="track__actions">${priceInfo}<button class="btn btn--primary btn--sm" data-buy="${i}">${T("player.buy")}</button></div>` : ""}
     </div>`;
 }
 
@@ -1251,18 +1250,29 @@ async function loadCircuits() {
       mine.push({ id, opened });
     }
 
-    if (mine.length === 0) {
+    // 已发行过的容器不可再选：音频路径固定为 music/{tokenId}.{cpu}，
+    // 而 putFile 是整体覆盖，重复发行会覆盖上一首的音频与封面
+    const usedIds = new Set(
+      tracksCache.filter((t) => Number(t.cpu) === PROCESSOR_NO).map((t) => Number(t.tokenId))
+    );
+    const available = mine.filter((c) => !usedIds.has(c.id));
+    const usedCount = mine.length - available.length;
+
+    if (available.length === 0) {
       // 保持可点击（禁用会让用户以为点了没反应），把原因写在提示里
       sel.disabled = false;
       sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;
-      info.textContent = `处理器 #${PROCESSOR_NO} 下未找到 ${shortAddr(account)} 持有的唱片容器`;
+      info.textContent = usedCount > 0
+        ? `名下 ${usedCount} 个容器都已发行过，请到 id.tapeout.link 开通新容器`
+        : `处理器 #${PROCESSOR_NO} 下未找到 ${shortAddr(account)} 持有的唱片容器`;
       info.style.color = "var(--danger)";
       return;
     }
-    sel.innerHTML = mine
+    sel.innerHTML = available
       .map((c) => `<option value="${c.id}" data-opened="${c.opened}">#${c.id} · ${c.opened ? T("pub.circuitOpened") : T("pub.circuitNotOpened")}</option>`)
       .join("");
     syncCircuitInfo();
+    if (usedCount > 0) info.textContent += ` · 已过滤 ${usedCount} 个已发行容器`;
   } catch (e) {
     sel.disabled = false;
     sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;

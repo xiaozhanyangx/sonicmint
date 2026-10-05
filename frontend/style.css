@@ -244,7 +244,7 @@ a { color: var(--primary); text-decoration: none; }
 .royalty-item button { padding: 8px 12px; background: transparent; border: 1px solid var(--border); color: var(--danger); border-radius: var(--r-sm); cursor: pointer; font-size: 12px; transition: all .15s; }
 
 /* ───────── 曲目列表 ───────── */
-.tracks { display: grid; grid-template-columns: repeat(auto-fill, minmax(154px, 1fr)); gap: 16px; }
+.tracks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
 
 /* 曲库工具栏：搜索 + 全部/我的切换 */
 .library-toolbar { display: flex; gap: 10px; align-items: center; margin: 12px 0; }
@@ -335,10 +335,18 @@ a { color: var(--primary); text-decoration: none; }
 .track__artist { font-size: 12px; color: var(--text-2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track__meta { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .track__meta .tag { margin-left: 0; }
-/* TapeOut 容器名（tokenId.区号.cpu）：等宽字形，和分类标签区分开 */
-.track__cid { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); }
-.track__actions { padding: 10px 12px 12px; margin-top: auto; }
-.track__actions .btn { width: 100%; }
+/* TapeOut 容器名（tokenId.区号.cpu）：压封面右上角，深底白字保证可读 */
+.track__cid {
+  position: absolute; top: 8px; right: 8px;
+  padding: 3px 8px; border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px;
+  background: rgba(10,8,24,.58); color: #fff;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35);
+}
+/* 价格与购买按钮同一行，不随卡片宽度换行 */
+.track__actions { padding: 10px 12px 12px; margin-top: auto; display: flex; align-items: center; gap: 10px; }
+.track__actions .tag { flex: 0 0 auto; white-space: nowrap; }
+.track__actions .btn { flex: 1 1 auto; min-width: 0; }
 
 .tag {
   display: inline-block; padding: 1px 7px; border-radius: 5px;
@@ -662,7 +670,7 @@ body.has-mini { padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px)); 
   .royalty-item button { padding: 10px 12px; font-size: 13px; flex: 0 0 auto; min-height: 44px; }
 
   /* ── 曲目卡片：窄屏两列，字号收紧 ── */
-  .tracks { gap: 12px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .tracks { gap: 12px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   .track__fallback { font-size: 28px; }
   .track__body { padding: 8px 10px 0; }
   .track__body:last-child { padding-bottom: 10px; }
