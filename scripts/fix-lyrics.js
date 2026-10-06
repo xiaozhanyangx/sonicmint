@@ -84,13 +84,17 @@ async function main() {
   const chunks = Math.ceil(data.length / CHUNK_MAX);
   console.log(`写入 ${chunks} 块…`);
 
-  await (await reg.setOperator(t.container, wallet.address, 3600)).wait();
-  await (await reg.putFile(t.container, t.lyricsPath, "text/plain", hash, data.subarray(0, CHUNK_MAX))).wait();
+  // 显式递增 nonce：RPC 的 pending nonce 会滞后，否则后一笔与前一笔撞 nonce
+  let nonce = await wallet.provider.getTransactionCount(wallet.address, "pending");
+  const next = () => ({ nonce: nonce++ });
+
+  await (await reg.setOperator(t.container, wallet.address, 3600, next())).wait();
+  await (await reg.putFile(t.container, t.lyricsPath, "text/plain", hash, data.subarray(0, CHUNK_MAX), next())).wait();
   for (let i = 1; i < chunks; i++) {
     const s = i * CHUNK_MAX;
-    await (await reg.appendChunk(t.container, t.lyricsPath, i, data.subarray(s, s + CHUNK_MAX))).wait();
+    await (await reg.appendChunk(t.container, t.lyricsPath, i, data.subarray(s, s + CHUNK_MAX), next())).wait();
   }
-  await (await reg.setOperator(t.container, wallet.address, 0)).wait();
+  await (await reg.setOperator(t.container, wallet.address, 0, next())).wait();
 
   const info = await reg.fileInfo(t.container, t.lyricsPath);
   const onchain = Number(info[0]);
