@@ -4,7 +4,7 @@
  * ============================================================ */
 
 // 前端版本：与 sw.js 的 CACHE 版本同步维护，展示在侧边栏底部
-const APP_VERSION = "v73";
+const APP_VERSION = "v77";
 
 // ───────── 链配置（仅 X Layer）─────────
 // 核心合约地址需从 TapeOut 官方 X Layer 部署文档获取后填入
@@ -140,6 +140,7 @@ async function chainFile(t, path) {
   }
   const out = { bytes: concatBytes(parts), type: info[1] || "" };
   fileCache.set(key, out);
+  if (path === t.coverPath) idbSet(key, out); // 封面落盘，二次打开直接本地读
   return out;
 }
 
@@ -184,6 +185,93 @@ function preloadCovers(tracks) {
     if (!t.coverPath || blobCache.has(`${t.container}:${t.coverPath}`)) return;
     chainBlobUrl(t, t.coverPath).then(refreshAfterAsset).catch((e) => console.warn("封面读取失败", e));
   });
+}
+
+// ───────── 本地持久化缓存（二次打开免等链）─────────
+// 曲目元数据存 localStorage，封面字节存 IndexedDB；只作首屏兜底，随后一律用链上数据覆盖
+const CACHE_KEY = "sm.tracks.v1";
+const IDB_NAME = "sonicmint";
+const IDB_STORE = "files";
+// getTracks 的 tuple 字段顺序（Result 的具名属性不进 JSON，须显式映射成普通对象）
+const TRACK_FIELDS = ["artist", "container", "tokenId", "cpu", "audioPath", "partCount", "coverPath", "lyricsPath",
+  "title", "artistName", "genre", "playCount", "totalEarned", "createdAt", "price", "free", "encrypted", "artistPubKey", "exists"];
+const TRACK_BIGINTS = new Set(["tokenId", "cpu", "partCount", "genre", "playCount", "totalEarned", "createdAt", "price"]);
+
+let idbPromise = null;
+function idb() {
+  if (!idbPromise) {
+    idbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    }).catch(() => null); // 隐私模式等禁用 IndexedDB 时降级为无缓存
+  }
+  return idbPromise;
+}
+
+async function idbGet(key) {
+  const db = await idb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    const req = db.transaction(IDB_STORE).objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function idbSet(key, val) {
+  const db = await idb();
+  if (!db) return;
+  const tx = db.transaction(IDB_STORE, "readwrite");
+  tx.onerror = () => {};
+  tx.objectStore(IDB_STORE).put(val, key);
+}
+
+// 曲目当前状态指纹：比对缓存与链上数据是否一致，避免无谓重绘
+function tracksSignature() {
+  return JSON.stringify(tracksCache.map((t) => TRACK_FIELDS.map((k) => (typeof t[k] === "bigint" ? t[k].toString() : t[k]))));
+}
+
+// 已购状态与账号绑定：换账号时缓存里的已购标记不能复用
+function readTracksCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data.tracks)) return null;
+    const tracks = data.tracks.map((row) => {
+      const o = {};
+      TRACK_FIELDS.forEach((k, i) => { o[k] = TRACK_BIGINTS.has(k) && row[i] != null ? BigInt(row[i]) : row[i]; });
+      return o;
+    });
+    return { tracks, account: data.account || "", purchased: Array.isArray(data.purchased) ? data.purchased : [] };
+  } catch {
+    return null;
+  }
+}
+
+function writeTracksCache() {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      account: account || "",
+      purchased: account ? purchasedCache : [],
+      tracks: tracksCache.map((t) => TRACK_FIELDS.map((k) => (typeof t[k] === "bigint" ? t[k].toString() : t[k]))),
+    }));
+  } catch { /* 超出配额等情况忽略，只是没缓存 */ }
+}
+
+// 用 IndexedDB 里的封面字节建 blob URL，使首屏渲染就有图
+async function hydrateCachedCovers(tracks) {
+  await Promise.all(tracks.map(async (t) => {
+    if (!t.coverPath) return;
+    const key = `${t.container}:${t.coverPath}`;
+    if (blobCache.has(key)) return;
+    const hit = await idbGet(key);
+    if (!hit || !hit.bytes) return;
+    fileCache.set(key, hit);
+    blobCache.set(key, URL.createObjectURL(new Blob([hit.bytes], { type: hit.type || "application/octet-stream" })));
+  }));
 }
 
 // ───────── 轻提示（替代 alert，不阻塞交互）─────────
@@ -237,6 +325,9 @@ async function connectWallet() {
       badge.textContent = `链 ${currentChainId}（不支持）`;
       badge.style.color = "var(--danger)";
       musicContract = null;
+      // 只支持 X Layer，连上即请求切链（成功后 chainChanged 刷新页面）
+      toast(`检测到链 ${currentChainId}，正在切换到 X Layer…`);
+      switchNetwork(196);
       return;
     }
 
@@ -704,9 +795,14 @@ window.addEventListener("beforeunload", (e) => {
 async function fetchTracks() {
   if (!musicContract) return;
   const count = Number(await musicContract.trackCount());
-  tracksCache = count === 0 ? [] : await musicContract.getTracks(0, count);
-  // 当前用户的买断状态（与 tracksCache 同索引）
-  purchasedCache = account ? await musicContract.getPurchased(account, 0, count).catch(() => []) : [];
+  // 曲目表与已购状态互不依赖，并行省一个往返
+  const [tracks, purchased] = await Promise.all([
+    count === 0 ? [] : musicContract.getTracks(0, count),
+    account ? musicContract.getPurchased(account, 0, count).catch(() => []) : [],
+  ]);
+  tracksCache = tracks;
+  purchasedCache = purchased; // 与 tracksCache 同索引
+  writeTracksCache();
   preloadCovers(tracksCache); // 封面后台读链，到达后自动重绘
 }
 
@@ -722,13 +818,26 @@ async function loadTracks() {
       </div>`;
     return;
   }
-  try {
+  // 1. 先显缓存：列表从 localStorage 恢复、封面从 IndexedDB 恢复，均为本地读
+  const cached = readTracksCache();
+  let cachedSig = null;
+  if (cached && cached.tracks.length) {
+    tracksCache = cached.tracks;
+    purchasedCache = cached.account === (account || "") ? cached.purchased : [];
+    cachedSig = tracksSignature();
+    await hydrateCachedCovers(tracksCache);
+    renderTracks();
+  } else {
     list.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+  }
+  // 2. 后台刷新：与缓存一致就不重绘，避免画面闪动
+  try {
     await fetchTracks();
     if (tracksCache.length === 0) { list.innerHTML = '<p class="muted">' + T("lib.noTrack") + "</p>"; return; }
+    if (cachedSig === tracksSignature()) return;
     renderTracks();
   } catch (e) {
-    list.innerHTML = '<p class="muted">加载失败：' + e.message + "</p>";
+    if (!cached) list.innerHTML = '<p class="muted">加载失败：' + e.message + "</p>";
   }
 }
 
@@ -791,16 +900,17 @@ function trackRowHtml(i) {
           ${genreTag}
         </div>
       </div>
-      ${locked ? `<div class="track__actions">${priceInfo}<button class="btn btn--primary btn--sm" data-buy="${i}">${T("player.buy")}</button></div>` : ""}
+      ${locked ? `<div class="track__actions">${priceInfo}<button class="btn btn--primary btn--sm" data-buy="${i}" onclick="doBuy(${i}, this)">${T("player.buy")}</button></div>` : ""}
     </div>`;
 }
 
-// 行点击：购买按钮 → 买断，其余 → 播放
+// 行点击：点击卡片播放；买断按钮自行处理（见 trackRowHtml 的 onclick）
 function bindTrackRows(container) {
   container.querySelectorAll(".track").forEach((el) => {
     const idx = Number(el.dataset.track);
     el.addEventListener("click", (e) => {
-      if (e.target.closest("[data-buy]")) { doBuy(idx, e.target.closest("[data-buy]")); return; }
+      // 买断按钮自带 onclick（直接绑定在移动端 WebView 里更可靠），这里只管播放入口
+      if (e.target.closest("[data-buy]")) return;
       playTrack(idx);
     });
   });
@@ -1141,8 +1251,15 @@ async function openLyrics() {
 // ───────── 买断 ─────────
 async function doBuy(idx, btn) {
   const t = tracksCache[idx];
-  if (!t || !musicContract) return;
+  // 每条提前返回都必须给出提示，否则移动端点击会表现为「完全没反应」
+  if (!t) { toast("曲目不存在，请刷新列表", "err"); return; }
   if (!account) { toast("请先连接钱包", "err"); return; }
+  if (!musicContract) {
+    // 不在 X Layer：请求钱包切链，成功后 chainChanged 会整页刷新，再点一次即可购买
+    toast(`检测到链 ${currentChainId}，正在切换到 X Layer…`);
+    await switchNetwork(196);
+    return;
+  }
   const label = btn ? btn.textContent : "";
   try {
     if (btn) { btn.disabled = true; btn.textContent = "支付中…"; }
@@ -1155,6 +1272,7 @@ async function doBuy(idx, btn) {
     const tx = await musicContract.buy(idx, buyerPubKey, { value: t.price });
     await tx.wait();
     purchasedCache[idx] = true;
+    writeTracksCache(); // 已购状态落盘，下次打开不再显示为锁定
     // 通知 keeper 封装 vault，并清空本地缓存以便重新读取
     if (t.encrypted) { vaultKeys = null; syncVault(); }
     toast(`买断成功：${t.title}`, "ok");
@@ -1166,6 +1284,7 @@ async function doBuy(idx, btn) {
   }
   if (purchasedCache[idx]) { renderTracks(); playTrack(idx); } // 买断后立即播放
 }
+window.doBuy = doBuy; // 供卡片按钮的 inline onclick 调用
 
 // ───────── 播放队列：上/下一曲（在可播放曲目内循环）─────────
 function playNext() {
@@ -1425,5 +1544,11 @@ window.addEventListener("DOMContentLoaded", () => {
   if (window.ethereum) {
     window.ethereum.on("accountsChanged", () => location.reload());
     window.ethereum.on("chainChanged", () => location.reload());
+    // 已授权则自动重连：切链或刷新后无需再点「连接钱包」
+    if ($("connectBtn")) {
+      window.ethereum.request({ method: "eth_accounts" })
+        .then((accs) => { if (accs && accs.length) connectWallet(); })
+        .catch(() => {});
+    }
   }
 });
