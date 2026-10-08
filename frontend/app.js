@@ -4,7 +4,7 @@
  * ============================================================ */
 
 // 前端版本：与 sw.js 的 CACHE 版本同步维护，展示在侧边栏底部
-const APP_VERSION = "v77";
+const APP_VERSION = "v78";
 
 // ───────── 链配置（仅 X Layer）─────────
 // 核心合约地址需从 TapeOut 官方 X Layer 部署文档获取后填入
@@ -94,6 +94,7 @@ let royaltyRecipients = []; // [{addr, bps}]
 let purchasedCache = [];       // bool[]，与 tracksCache 同索引
 let myKeyPair = null;          // 当前钱包派生的 X25519 密钥对（仅存内存，不落地）
 let vaultKeys = null;          // {trackId: K 的 hex}，来自链上 vault
+let walletReady = false;       // 完成一次连接握手后才响应钱包事件，屏蔽握手期的噪声
 
 const $ = (id) => document.getElementById(id);
 const shortAddr = (a) => a.slice(0, 6) + "…" + a.slice(-4);
@@ -299,13 +300,15 @@ async function sha256Bytes(bytes) {
 }
 
 // ───────── 钱包 ─────────
-async function connectWallet() {
+async function connectWallet(silent) {
   if (!window.ethereum) { toast("请安装 MetaMask / OKX Wallet 等 EVM 钱包", "err"); return; }
   try {
-    await window.ethereum.request({ method: "eth_requestAccounts" });
+    // 自动重连（silent）已授权，跳过 eth_requestAccounts，避免钱包补发事件造成干扰
+    if (silent !== true) await window.ethereum.request({ method: "eth_requestAccounts" });
     provider = new ethers.BrowserProvider(window.ethereum);
     signer = await provider.getSigner();
     account = await signer.getAddress();
+    walletReady = true; // 握手完成，之后钱包事件才生效
     $("connectBtn").textContent = shortAddr(account);
 
     const net = await provider.getNetwork();
@@ -1447,7 +1450,7 @@ window.addEventListener("DOMContentLoaded", () => {
   musicContract = new ethers.Contract(currentNetwork.music, SONICMINT_ABI, provider);
   // 通用：所有页面
   const connectBtn = $("connectBtn");
-  if (connectBtn) connectBtn.addEventListener("click", connectWallet);
+  if (connectBtn) connectBtn.addEventListener("click", () => connectWallet());
 
   // 网络切换按钮
   const netXlayer = $("netXlayer");
@@ -1542,12 +1545,19 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   if (window.ethereum) {
-    window.ethereum.on("accountsChanged", () => location.reload());
-    window.ethereum.on("chainChanged", () => location.reload());
+    // 仅在确实变化时才 reload，避免与自动重连互触发形成刷新死循环
+    window.ethereum.on("accountsChanged", (accs) => {
+      const next = String((accs && accs[0]) || "").toLowerCase();
+      // 集成为空数组属握手噪声，忽略；只有真正换到别的账户才刷新
+      if (walletReady && next && next !== (account || "").toLowerCase()) location.reload();
+    });
+    window.ethereum.on("chainChanged", (id) => {
+      if (walletReady && Number(id) !== currentChainId) location.reload();
+    });
     // 已授权则自动重连：切链或刷新后无需再点「连接钱包」
     if ($("connectBtn")) {
       window.ethereum.request({ method: "eth_accounts" })
-        .then((accs) => { if (accs && accs.length) connectWallet(); })
+        .then((accs) => { if (accs && accs.length) connectWallet(true); })
         .catch(() => {});
     }
   }
