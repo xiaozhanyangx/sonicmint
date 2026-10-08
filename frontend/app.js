@@ -4,7 +4,7 @@
  * ============================================================ */
 
 // 前端版本：与 sw.js 的 CACHE 版本同步维护，展示在侧边栏底部
-const APP_VERSION = "v78";
+const APP_VERSION = "v83";
 
 // ───────── 链配置（仅 X Layer）─────────
 // 核心合约地址需从 TapeOut 官方 X Layer 部署文档获取后填入
@@ -125,8 +125,8 @@ function chainReader() {
   return readProvider;
 }
 
-// 读一个链上文件，带内存缓存
-async function chainFile(t, path) {
+// 读一个链上文件，带内存缓存；onProgress(已读, 总长) 用于展示读取进度
+async function chainFile(t, path, onProgress) {
   const key = `${t.container}:${path}`;
   const hit = fileCache.get(key);
   if (hit) return hit;
@@ -138,6 +138,7 @@ async function chainFile(t, path) {
   for (let off = 0; off < size; off += READ_SEG) {
     const raw = await reg.readRange(t.container, path, off, Math.min(READ_SEG, size - off));
     parts.push(ethers.getBytes(raw));
+    if (onProgress) onProgress(Math.min(off + READ_SEG, size), size);
   }
   const out = { bytes: concatBytes(parts), type: info[1] || "" };
   fileCache.set(key, out);
@@ -1016,7 +1017,12 @@ function syncPlayIcon() {
 // 播放/暂停切换
 function togglePlay() {
   const audio = $("audio");
-  if (!audio.src) { const p = playableIdx(); if (p.length) playTrack(p[0]); return; }
+  if (!audio.src) {
+    // 有选中曲目就重试它：链上读取期间点 ▶ 时 src 仍为空，不能回落到第一首
+    const idx = currentTrackIdx != null && tracksCache[currentTrackIdx] ? currentTrackIdx : playableIdx()[0];
+    if (idx != null) playTrack(idx);
+    return;
+  }
   if (audio.paused) {
     // 之前被自动播放策略拦下留下的提示，在用户点播时换回艺人名
     const mini = $("miniArtist");
@@ -1056,25 +1062,31 @@ function closeQueue() { const q = $("queue"); if (q) q.hidden = true; }
 
 // ───────── 播放（链上读取 / 加密解密 / 分片合并）─────────
 // 取完整音频字节（分片则依次读回后合并）
-async function fetchAudioBytes(t) {
+// onProgress(进度值, 总份数)：两者之比即整体完成比例，单文件按字节、分片按片数细分
+async function fetchAudioBytes(t, onProgress) {
   const partCount = Number(t.partCount);
   if (partCount <= 1) {
-    const { bytes } = await chainFile(t, t.audioPath);
+    const { bytes } = await chainFile(t, t.audioPath, onProgress);
     return bytes;
   }
   const chunks = [];
   for (let i = 0; i < partCount; i++) {
-    const { bytes } = await chainFile(t, `${t.audioPath}.part${i}`);
+    const { bytes } = await chainFile(t, `${t.audioPath}.part${i}`, (read, size) =>
+      onProgress && onProgress(i + read / size, partCount)
+    );
     chunks.push(bytes);
   }
   return concatBytes(chunks);
 }
+
+let playToken = 0; // 每次 playTrack 自增，用于丢弃过期的链上读取结果
 
 async function playTrack(idx) {
   const t = tracksCache[idx];
   if (!t) return;
   if (!canPlay(idx)) { toast(account ? T("player.locked") : "请先连接钱包", "err"); return; }
 
+  const token = ++playToken; // 换曲令牌：慢的旧读取不得覆盖新选择
   currentTrackIdx = idx;
   lyricsLines = []; // 换曲后旧歌词作废
   lyricsFor = null;
@@ -1090,21 +1102,31 @@ async function playTrack(idx) {
   audio.onpause = syncPlayIcon;
   audio.onended = () => playNext(); // 自动连播下一曲
 
+  const playBtn = $("playToggle");
+  if (playBtn) playBtn.disabled = true; // 读取期间禁用 ▶
+  // 读取进度写进播放条副标题；留 1% 给解密与解码
+  const showReadProgress = (done, total) => {
+    if (token !== playToken || !total) return;
+    const pct = Math.min(99, Math.round((done / total) * 100));
+    if ($("miniArtist")) $("miniArtist").textContent = `正在从链上读取… ${pct}%`;
+  };
   try {
     // 链上读取需要几秒（2.4MB 约 5s），先在播放条上给出反馈
     if ($("miniArtist")) $("miniArtist").textContent = "正在从链上读取…";
-    let bytes = await fetchAudioBytes(t);
+    let bytes = await fetchAudioBytes(t, showReadProgress);
     if (t.encrypted) {
       // 取自己的内容密钥 K（keeper 未就绪时轮询等待）
       const keyHex = await vaultKeyFor(idx);
       if (!keyHex) throw new Error("密钥尚未就绪，请稍后重试");
       bytes = cryptoLib().decryptBytes(cryptoLib().hexToBytes(keyHex, 32), bytes);
     }
+    if (token !== playToken) return; // 读取期间已切到别的曲目，丢弃本次结果
     fillMini(t); // 读完了，把「正在读取」换回曲目信息
     audio.src = URL.createObjectURL(new Blob([bytes], { type: pathMime(t.audioPath) }));
     syncSeek(); // 立刻归零，时长就绪后再由 loadedmetadata 补齐
     await audio.play();
   } catch (e) {
+    if (token !== playToken) return; // 过期的读取失败，与当前曲目无关
     // NotAllowedError：链上读取耗时超出用户手势有效期，自动播放被浏览器策略拦下。
     // 音频此时已就绪，点 ▶ 即可，不算失败，也不该打断播放条状态。
     if (e.name === "NotAllowedError") {
@@ -1114,6 +1136,8 @@ async function playTrack(idx) {
       currentTrackIdx = null;
       markPlaying();
     }
+  } finally {
+    if (token === playToken && playBtn) playBtn.disabled = false; // 只有最新一次读取负责恢复
   }
   renderQueue();
 }
@@ -1309,16 +1333,31 @@ async function shareCurrent() {
   if (!t) return;
   const url = location.origin + location.pathname + "?track=" + currentTrackIdx;
   const text = `🎵 ${t.title} — ${t.artistName} · 声刻 SonicMint 链上音乐`;
-  if (navigator.share) {
-    try { await navigator.share({ title: t.title, text, url }); } catch (e) { /* 用户取消 */ }
-  } else {
-    try {
-      await navigator.clipboard.writeText(`${text}\n${url}`);
-      toast("已复制分享信息", "ok");
-    } catch {
-      toast(`${text}\n${url}`);
-    }
+  // 桌面端（尤其 Windows）系统分享面板常不可用，只弹报错；仅移动端用原生分享
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  if (mobile && navigator.share) {
+    try { await navigator.share({ title: t.title, text, url }); return; }
+    catch (e) { if (e.name === "AbortError") return; } // 用户取消，不再兜底
   }
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    toast("已复制分享信息", "ok");
+  } catch {
+    toast(`${text}\n${url}`);
+  }
+}
+
+// ───────── 分享链接 ?track=N：定位曲目，能播则播 ─────────
+function applySharedTrack() {
+  const id = new URLSearchParams(location.search).get("track");
+  if (id == null) return;
+  const idx = Number(id);
+  if (!Number.isInteger(idx) || !tracksCache[idx]) return;
+  const t = tracksCache[idx];
+  const card = document.querySelector(`#trackList .track[data-track="${idx}"]`);
+  if (card) card.scrollIntoView({ block: "center" });
+  toast(`来自分享：${t.title} · ${t.artistName}`, "ok");
+  if (canPlay(idx)) playTrack(idx); // 桌面端自动播放多被拦截，playTrack 会落到「已就绪，点 ▶」
 }
 
 // ───────── 创作者面板：我的曲目 + 版税统计 ─────────
@@ -1541,7 +1580,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if ("scrollRestoration" in history) history.scrollRestoration = "manual"; // 禁用刷新后的滚动恢复，避免 Hero 被吸顶栏遮住
     window.addEventListener("hashchange", () => { switchTab(); window.scrollTo(0, 0); }); // 切面板回到顶部
     window.scrollTo(0, 0);
-    (async () => { await loadTracks(); switchTab(); })();
+    (async () => { await loadTracks(); switchTab(); applySharedTrack(); })();
   }
 
   if (window.ethereum) {

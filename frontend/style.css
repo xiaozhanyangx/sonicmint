@@ -410,6 +410,9 @@ a { color: var(--primary); text-decoration: none; }
   box-shadow: 0 4px 12px rgba(91,75,224,.35);
 }
 .mini__btn--play:hover { background: var(--primary-grad); color: #fff; }
+/* 链上读取期间按钮不可用（如 ▶），避免误触发兜底逻辑 */
+.mini__btn:disabled { opacity: .5; pointer-events: none; }
+
 body.has-mini { padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
 
 /* ───────── 我的曲库抽屉 ───────── */
