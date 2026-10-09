@@ -4,7 +4,7 @@
  * ============================================================ */
 
 // 前端版本：与 sw.js 的 CACHE 版本同步维护，展示在侧边栏底部
-const APP_VERSION = "v83";
+const APP_VERSION = "v87";
 
 // ───────── 链配置（仅 X Layer）─────────
 // 核心合约地址需从 TapeOut 官方 X Layer 部署文档获取后填入
@@ -642,7 +642,9 @@ async function uploadAudio() {
     if (!(await openerContract.isOpened(processor, tokenId)))
       throw new Error("该唱片容器未开通，请先去 id.tapeout.link 开通");
 
-    const basePath = `music/${tokenId}.${cpu}`;
+    // 一容器可发行多首：路径加随机后缀保证唯一，避免 putFile 整体覆盖同容器内其它曲目
+    const salt = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const basePath = `music/${tokenId}.${cpu}-${salt}`;
     const coverBuf = coverFile ? new Uint8Array(await coverFile.arrayBuffer()) : null;
 
     // ─── 加密音频（付费曲目）：随机 K 加密，K 封给 keeper 后上链 ───
@@ -1145,6 +1147,14 @@ async function playTrack(idx) {
 // ───────── 播放进度条 ─────────
 let seeking = false; // 拖动中不随播放回写，避免抖动
 
+// 秒 → m:ss（超过一小时补 h:）
+function fmtTime(s) {
+  if (!Number.isFinite(s) || s < 0) return "0:00";
+  const t = Math.floor(s), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+  const mm = h ? String(m).padStart(2, "0") : String(m);
+  return `${h ? h + ":" : ""}${mm}:${String(sec).padStart(2, "0")}`;
+}
+
 // 播放位置 → 进度条（0..1000，与时长无关，换曲自动适配）
 function syncSeek() {
   const el = $("seekBar"), a = $("audio");
@@ -1152,6 +1162,8 @@ function syncSeek() {
   const dur = a.duration;
   const ok = Number.isFinite(dur) && dur > 0;
   el.disabled = !ok; // 时长未知（读取中）时不可拖
+  if ($("miniCur")) $("miniCur").textContent = fmtTime(a.currentTime);
+  if ($("miniDur")) $("miniDur").textContent = ok ? fmtTime(dur) : "0:00"; // 元数据未就绪先显示 0:00
   if (seeking) return;
   el.value = ok ? String(Math.round((a.currentTime / dur) * 1000)) : "0";
 }
@@ -1411,29 +1423,19 @@ async function loadCircuits() {
       mine.push({ id, opened });
     }
 
-    // 已发行过的容器不可再选：音频路径固定为 music/{tokenId}.{cpu}，
-    // 而 putFile 是整体覆盖，重复发行会覆盖上一首的音频与封面
-    const usedIds = new Set(
-      tracksCache.filter((t) => Number(t.cpu) === PROCESSOR_NO).map((t) => Number(t.tokenId))
-    );
-    const available = mine.filter((c) => !usedIds.has(c.id));
-    const usedCount = mine.length - available.length;
-
-    if (available.length === 0) {
+    // 一容器可发行多首：每首路径独立（见 uploadAudio 的 basePath），不再过滤已用容器
+    if (mine.length === 0) {
       // 保持可点击（禁用会让用户以为点了没反应），把原因写在提示里
       sel.disabled = false;
       sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;
-      info.textContent = usedCount > 0
-        ? `名下 ${usedCount} 个容器都已发行过，请到 id.tapeout.link 开通新容器`
-        : `处理器 #${PROCESSOR_NO} 下未找到 ${shortAddr(account)} 持有的唱片容器`;
+      info.textContent = `处理器 #${PROCESSOR_NO} 下未找到 ${shortAddr(account)} 持有的唱片容器`;
       info.style.color = "var(--danger)";
       return;
     }
-    sel.innerHTML = available
+    sel.innerHTML = mine
       .map((c) => `<option value="${c.id}" data-opened="${c.opened}">#${c.id} · ${c.opened ? T("pub.circuitOpened") : T("pub.circuitNotOpened")}</option>`)
       .join("");
     syncCircuitInfo();
-    if (usedCount > 0) info.textContent += ` · 已过滤 ${usedCount} 个已发行容器`;
   } catch (e) {
     sel.disabled = false;
     sel.innerHTML = `<option value="">${T("pub.circuitEmpty")}</option>`;

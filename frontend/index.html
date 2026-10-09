@@ -217,7 +217,7 @@
           </div>
           <!-- 特别说明：容器来源限制 -->
           <div class="callout" data-i18n-html="pub.circuitNote">
-            <strong>特别说明：</strong>“唱片容器”是 SonicMint 产品专用的链上容器，仅支持 X Layer 链上 260 号 SonicMint 处理器的容器，其他链或其他处理器的容器无法在本平台发行。
+            <strong>特别说明：</strong>“唱片容器”是 SonicMint 产品专用的链上容器，仅支持 X Layer 链上 260 号 SonicMint 处理器的容器，其他链或其他处理器的容器无法在本平台发行。<strong>一个容器可发行多个音乐作品。</strong>
           </div>
           <div class="form__row">
             <label data-i18n="pub.genre">分类</label>
@@ -356,7 +356,11 @@
         <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/></svg>
       </button>
     </div>
-    <input id="seekBar" class="mini__seek" type="range" min="0" max="1000" step="1" value="0" aria-label="播放进度" />
+    <div class="mini__progress">
+      <span id="miniCur" class="mini__time">0:00</span>
+      <input id="seekBar" class="mini__seek" type="range" min="0" max="1000" step="1" value="0" aria-label="播放进度" />
+      <span id="miniDur" class="mini__time">0:00</span>
+    </div>
   </div>
   <audio id="audio"></audio>
 

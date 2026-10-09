@@ -391,10 +391,13 @@ a { color: var(--primary); text-decoration: none; }
 .mini__info { flex: 1; min-width: 0; }
 .mini__title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini__artist { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 播放进度条：native range + accent-color 着色；独占一行横跨整条
+/* 播放进度：时长 + 进度条 + 总时长，独占一行横跨整条
    （放 info 里会随 info 被按钮挤压，移动端只剩几十像素） */
-.mini__seek { flex: 0 0 100%; height: 16px; cursor: pointer; accent-color: var(--primary); }
+.mini__progress { flex: 0 0 100%; display: flex; align-items: center; gap: 8px; }
+.mini__seek { flex: 1; min-width: 0; height: 16px; cursor: pointer; accent-color: var(--primary); }
 .mini__seek:disabled { opacity: .45; cursor: default; }
+/* 等宽数字 + 定宽：秒数跳动时进度条不会左右抖 */
+.mini__time { flex: 0 0 auto; min-width: 38px; font-size: 11px; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
 .mini__controls { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .mini__btn {
   width: 36px; height: 36px; border: none; background: none; cursor: pointer;
